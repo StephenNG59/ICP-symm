@@ -2,51 +2,44 @@
 
 #include "myicp.h"
 
+void help();
+
 int main(int argc, char** argv)
 {
+	help();
+
 	MyICP myicp;
 	myicp.LoadCloud("cat.pcd", "cat_out.pcd");
+	pcl::PointCloud<PointT>::Ptr cloud_src = myicp.GetSrcCloud(), cloud_tgt = myicp.GetTgtCloud(), cloud_apply(new pcl::PointCloud<PointT>);
 	
-	myicp.RegisterSymm();
+	// registrate
+	Eigen::Affine3f guess = myicp.RegisterSymm();
+
+	 //transform
+	float theta = M_PI / 4.0;
+	Eigen::Affine3f transform = Eigen::Affine3f::Identity();
+	transform.translation() << 2.5, 0.0, 0.0;
+	transform.rotate(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitZ()));
+	cout << "actual transform :" << endl
+		<< transform.matrix() << endl;
+	// apply 
+	pcl::transformPointCloud(*cloud_src, *cloud_apply, guess);
 
 	// visualize
-	pcl::visualization::PCLVisualizer viewer("test");
-	// translate to PointXYZ type so that can be added into viewer
-	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud1(new pcl::PointCloud<pcl::PointXYZ>);
-	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud2(new pcl::PointCloud<pcl::PointXYZ>);
-	pcl::PointCloud<PointT>::Ptr cloud = myicp.GetSrcCloud();
-	int npts = cloud->points.size();
-	for (size_t i = 0; i < npts; i++)
-	{
-		pcl::PointXYZ p;
-		p.x = cloud->points[i].x, p.y = cloud->points[i].y, p.z = cloud->points[i].z;
-		cloud1->points.push_back(p);
-	}
-	cloud = myicp.GetTgtCloud();
-	npts = cloud->points.size();
-	for (size_t i = 0; i < npts; i++)
-	{
-		pcl::PointXYZ p;
-		p.x = cloud->points[i].x, p.y = cloud->points[i].y, p.z = cloud->points[i].z;
-		cloud2->points.push_back(p);
-	}
-	//viewer.addPointCloud(cloud1);
-	viewer.addPointCloud(cloud2);
+	pcl::visualization::PointCloudColorHandlerCustom<PointT> 
+		red_handler(cloud_src, 200, 20, 20), green_handler(cloud_tgt, 20, 200, 20), blue_handler(cloud_apply, 20, 20, 200);
+	pcl::visualization::PCLVisualizer viewer("Viewer#1");
+	viewer.setBackgroundColor(255, 255, 255);
+	viewer.addPointCloud(cloud_src, red_handler, "cloud1");
+	viewer.addPointCloud(cloud_tgt, green_handler, "cloud2");
+	viewer.addPointCloud(cloud_apply, blue_handler, "cloud3");
+
 
 	// show viewer
 	while (!viewer.wasStopped())
 	{
 		viewer.spinOnce();
 	}
-
-
-	// //transform
-	//float theta = M_PI / 4.0;
-	//Eigen::Affine3f transform = Eigen::Affine3f::Identity();
-	//transform.translation() << 2.5, 0.0, 0.0;
-	//transform.rotate(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitZ()));
-
-	//pcl::transformPointCloud(*(myicp.GetSrcCloud()), *(myicp.GetTgtCloud()), transform);
 
 	// //save file
 	//pcl::io::savePCDFile("cat_out.pcd", *(myicp.GetTgtCloud()));
@@ -65,4 +58,15 @@ int main(int argc, char** argv)
 
 	cout << "R" << R << endl;
 	cout << "T" << T << endl;*/
+}
+
+void help()
+{
+	cout << "Usage:" << endl
+		<< "  --symm [source-pcd-file] [target-pcd-file] :" << endl
+		<< "    use symmetric object function to registrate 2 pcd point clouds" << endl
+		<< "  -v [source-pcd-file] [output-pcd-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z] :" << endl
+		<< "    transform source pcd file and save the result in output pcd file" << endl
+		<< "      e.g. \".\\ICP.exe\" -v \".\\bunny.pcd\" \".\\bunny-out.pcd\" 0 0 1 30 2 2 -5" << endl
+		<< endl;
 }

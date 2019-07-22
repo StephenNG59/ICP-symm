@@ -2,6 +2,9 @@
 
 #include "stdafx.h"
 
+constexpr int DEFAULT_MAX_ITERS = 30;
+constexpr float DEFAULT_DIFF_THRESH = 10.f;
+
 typedef pcl::PointXYZ PointT;
 
 class MyICP
@@ -16,7 +19,7 @@ public:
 	pcl::PointCloud<PointT>::Ptr GetTgtCloud();
 
 	void RegisterP2P();
-	void RegisterSymm();		// todo add params to specify iters & diff
+	Eigen::Affine3f RegisterSymm();		// todo add params to specify iters & diff
 
 
 private:

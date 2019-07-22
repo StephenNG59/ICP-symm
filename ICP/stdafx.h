@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <assert.h>
+#include <time.h>
 
 #include <pcl\io\pcd_io.h>						// pcd files io
 #include <pcl\point_cloud.h>

@@ -39,6 +39,7 @@ float evalDiff(const Eigen::MatrixXf& src, const Eigen::MatrixXf& tgt, const std
 	return 0.f;
 }
 
+
 //x N和c忘记加引用了……
 void calculateMatrixNotation(const Eigen::MatrixXf& src_mat_xyz, const Eigen::MatrixXf& src_mat_normal, const Eigen::MatrixXf& tgt_mat_xyz, const Eigen::MatrixXf& tgt_mat_normal, Eigen::MatrixXf& M, Eigen::MatrixXf& N, Eigen::VectorXf& c)
 {
@@ -75,31 +76,37 @@ Eigen::VectorXf solveLLS(const Eigen::MatrixXf& A, const Eigen::VectorXf& b)
 
 Eigen::Affine3f estimateTransformSymm(const Eigen::MatrixXf& src_mat_xyz, const Eigen::MatrixXf& src_mat_normal, const Eigen::MatrixXf& tgt_mat_xyz, const Eigen::MatrixXf& tgt_mat_normal)
 {
-	// get matrix notation of M & N, get vector notation of c
+	// 1. get matrix notation of M & N, get vector notation of c
+	// ---------------------------------------------------------
 	Eigen::MatrixXf M, N;
 	Eigen::VectorXf c;
 	calculateMatrixNotation(src_mat_xyz, src_mat_normal, tgt_mat_xyz, tgt_mat_normal, M, N, c);
 
-	// solve LLS by SVD for a_ and t_ 
+
+	// 2. solve LLS by SVD for a_ and t_ 
+	// ---------------------------------
 	//	ε = ||c + M * a_ + N * t_||^2, with a_ = aixs * tan(θ), t_ = translate / cos(θ)
 	Eigen::Vector3f src_mean = src_mat_xyz.colwise().mean(), tgt_mean = tgt_mat_xyz.colwise().mean();
-	Eigen::Vector3f a_, t_ = tgt_mean - src_mean;		//? now initialize t_ with translate and use it to calc a_. reasonable?
-	a_ = solveLLS(M, -(N * t_ + c));					//! no normals, so N is [0*0]
-	t_ = solveLLS(N, -(M * a_ + c));
+	Eigen::Vector3f t_ = tgt_mean - src_mean, a_;		//? now initialize t_ with diff of mean and use this t_ to calc a_. (initialize t_ = 0 will result in chaos)
+	a_ = solveLLS(M, -(N * t_ + c)), t_ = solveLLS(N, -(M * a_ + c));
 
-	// calculate transform matrix based on a_ and t_
+
+	// 3. calculate transform matrix based on a_ and t_
+	// ------------------------------------------------
 	Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 	// θ = arctan(||a_||)
 	float theta = atan(a_.norm());
-	// transform = trans(tgt_mean) * rot(θ, a_) * trans(t_ * θ) * rot(θ, a_) * trans(-src_mean)
-	transform.translate(-src_mean);
+	//! transform = rot(θ, a_) * trans(t_ * θ) * rot(θ, a_)
+	//x transform = trans(tgt_mean) * rot(θ, a_) * trans(t_ * θ) * rot(θ, a_) * trans(-src_mean)
+	//x transform.translate(-src_mean);
 	transform.rotate(Eigen::AngleAxisf(theta, a_ / a_.norm()));
 	transform.translate(t_ * cos(theta));
 	transform.rotate(Eigen::AngleAxisf(theta, a_ / a_.norm()));
-	transform.translate(tgt_mean);
+	//x transform.translate(tgt_mean);
 
 	return transform;
 }
+
 
 void applyTransform(Eigen::MatrixXf& src, Eigen::MatrixXf& tgt, Eigen::Affine3f& transform)
 {
