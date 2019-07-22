@@ -120,32 +120,3 @@ void applyTransform(Eigen::MatrixXf& src, Eigen::MatrixXf& tgt, Eigen::Affine3f&
 	tgt = med.leftCols(3);
 }
 
-
-/*void estimateTransformSymm(const pcl::PointCloud<pcl::PointXYZLNormal>::Ptr cloud_src, const pcl::PointCloud<pcl::PointXYZLNormal>::Ptr cloud_tgt, Eigen::Vector3f& axis, float& theta, Eigen::Vector3f& translate)
-{
-	int npts = cloud_src->points.size();
-
-	// matrix to store XYZ & normals
-	Eigen::MatrixXf mat_src(npts, 3), mat_src_normal(npts, 3), mat_tgt(npts, 3), mat_tgt_normal(npts, 3);
-	cout << mat_src.rows() << mat_src.cols() << endl;
-
-	// copy meanwhile demean, and get the [translate]
-	translate = pasteInMatrix(cloud_src, cloud_tgt, mat_src, mat_src_normal, mat_tgt, mat_tgt_normal);
-
-	// calculate matrix notation M & N, and vector c
-	Eigen::MatrixXf M(npts, 3), N(npts, 3);
-	Eigen::VectorXf c(npts);
-	calculateMatrixNotation(mat_src, mat_src_normal, mat_tgt, mat_tgt_normal, M, N, c);
-
-	// solve LLS by SVD for a_ and t_ 
-	//	¦Å = ||c + M * a_ + N * t_||_2
-	//	ÆäÖÐa_ = a * tan(¦È), t_ = t / cos(¦È)
-	Eigen::Vector3f a_, t_;
-	solveLLS(M, -(N * (translate / cos(theta)) + c), a_);		// TODO: divide by 0
-	solveLLS(N, -(M * (axis * tan(theta)) + c), t_);
-
-	// calculate [axis] & [theta] by a_ & t_
-	cout << "translate / t_:" << translate[0] / t_[0] << translate[1] / t_[1] << translate[2] / t_[2] << endl;
-	theta = acos(translate.norm() / t_.norm());		// TODO: if translate == 0, theta -> 90¡ã
-	axis = a_ * tan(theta);
-}*/
