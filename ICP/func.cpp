@@ -127,3 +127,23 @@ void applyTransform(Eigen::MatrixXf& src, Eigen::MatrixXf& tgt, Eigen::Affine3f&
 	tgt = med.leftCols(3);
 }
 
+void pasteWithCorrespondence(pcl::Correspondences& correspondences, Eigen::MatrixXf& src_mat, Eigen::MatrixXf& src_mat_cor, Eigen::MatrixXf& tgt_mat, Eigen::MatrixXf& tgt_mat_cor)
+{
+	int size = correspondences.size();
+	src_mat_cor = Eigen::MatrixXf(size, 3), tgt_mat_cor = Eigen::MatrixXf(size, 3);
+
+	for (size_t i = 0; i < size; i++)
+	{
+		src_mat_cor.row(i) = src_mat.row(correspondences[i].index_query);
+		tgt_mat_cor.row(i) = tgt_mat.row(correspondences[i].index_match);
+	}
+}
+
+void findCorrespondences(pcl::PointCloud<pcl::PointNormal>::Ptr cloud_src, pcl::PointCloud<pcl::PointNormal>::Ptr cloud_tgt, pcl::Correspondences& correspondences)
+{
+	pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal> ce;
+	ce.setInputSource(cloud_src), ce.setInputTarget(cloud_tgt);
+	ce.determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
+																//x ce.determineCorrespondences(correspondences);
+}
+

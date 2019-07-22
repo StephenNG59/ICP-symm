@@ -36,7 +36,7 @@ int main(int argc, char** argv)
 
 
 	// show viewer
-	while (!viewer.wasStopped())
+	//while (!viewer.wasStopped())
 	{
 		viewer.spinOnce();
 	}

@@ -13,5 +13,6 @@
 #include <pcl\PCLPointCloud2.h>					// pcl::PCLPointCloud2
 #include <pcl/common/transforms.h>
 #include <pcl/features/normal_3d.h>				// normal estimation
+#include <pcl/registration/correspondence_estimation.h>
 
 #include <opencv2/opencv.hpp>

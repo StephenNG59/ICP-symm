@@ -2,8 +2,8 @@
 
 #include "stdafx.h"
 
-constexpr int DEFAULT_MAX_ITERS = 30;
-constexpr float DEFAULT_DIFF_THRESH = 10.f;
+constexpr int DEFAULT_MAX_ITERS = 100;
+constexpr float DEFAULT_DIFF_THRESH = 0.1f;
 
 typedef pcl::PointXYZ PointT;
 
@@ -28,7 +28,7 @@ private:
 
 	pcl::PCLPointCloud2::Ptr pclcloud_src, pclcloud_tgt;
 	pcl::PointCloud<PointT>::Ptr cloud_src, cloud_tgt;
-	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_src, cloud_pn_tgt;
+	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_src, cloud_pn_tgt, cloud_pn_med;
 
 	void estimateNormals();
 };

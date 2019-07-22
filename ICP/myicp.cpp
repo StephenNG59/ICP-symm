@@ -11,6 +11,7 @@ MyICP::MyICP() : max_iters(DEFAULT_MAX_ITERS), diff_threshold(DEFAULT_DIFF_THRES
 	cloud_tgt = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
 	cloud_pn_src = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
 	cloud_pn_tgt = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
+	cloud_pn_med = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
 }
 
 MyICP::~MyICP()
@@ -66,21 +67,26 @@ Eigen::Affine3f MyICP::RegisterSymm()
 	{
 		cout << "iters#" << iters << " - diff: " << diff << endl;
 
-		// 3.1. find correspondence and sort tgt_mat_xyz and tgt_mat_normal by indices
-		// todo indices = ...
-		Eigen::MatrixXf tgt_mat_xyz_cor = tgt_mat_xyz, tgt_mat_normal_cor = tgt_mat_normal;
-		// todo tgt_mat_xyz_cor = ...; tgt_mat_normal_cor = ...;
+		// 3.1. find correspondence
+		pcl::Correspondences correspondences;
+		findCorrespondences(cloud_pn_med, cloud_pn_tgt, correspondences);
+		
+		// 3.2. paste into new matrix based on correspondences
+		Eigen::MatrixXf src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor;
+		pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
+		pasteWithCorrespondence(correspondences, src_mat_normal, src_mat_normal_cor, tgt_mat_normal, tgt_mat_normal_cor);
 
-		// 3.2. estimate best transform from src to tgt_cor
-		Eigen::Affine3f incre_transform = estimateTransformSymm(src_mat_xyz, src_mat_normal, tgt_mat_xyz_cor, tgt_mat_normal_cor);
+		// 3.3. estimate best transform from src_cor to tgt_cor
+		Eigen::Affine3f incre_transform = estimateTransformSymm(src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor);
 		transform = incre_transform * transform;
 
-		// 3.3. pad n*3 matrix to n*4 and apply transform
+		// 3.4. pad n*3 matrix to n*4 and apply transform
 		applyTransform(src_mat_xyz, src_mat_xyz, incre_transform);
 		applyTransform(src_mat_normal, src_mat_normal, incre_transform);
+		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med, *cloud_pn_med, incre_transform);
 		//x cout << "  current transform" << endl << transform.matrix() << endl;
 
-		// 3.4. evaluate diff
+		// 3.5. evaluate diff
 		diff = evalDiff(src_mat_xyz, tgt_mat_xyz);
 
 	}
@@ -112,4 +118,5 @@ void MyICP::estimateNormals()
 	// concatenate
 	pcl::concatenateFields(*cloud_src, normals_src, *cloud_pn_src);
 	pcl::concatenateFields(*cloud_tgt, normals_tgt, *cloud_pn_tgt);
+	*cloud_pn_med = *cloud_pn_src;
 }
