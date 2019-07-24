@@ -28,7 +28,7 @@ float evalDiff(const Eigen::MatrixXf& src, const Eigen::MatrixXf& tgt)
 		diff += (src.row(i) - tgt.row(i)).norm();
 	}
 
-	return diff;
+	return diff / npts;
 }
 
 
@@ -88,8 +88,11 @@ Eigen::Affine3f estimateTransformSymm(const Eigen::MatrixXf& src_mat_xyz, const 
 	// ---------------------------------
 	//	¦Å = ||c + M * a_ + N * t_||^2, with a_ = aixs * tan(¦È), t_ = translate / cos(¦È)
 	Eigen::Vector3f src_mean = src_mat_xyz.colwise().mean(), tgt_mean = tgt_mat_xyz.colwise().mean();
-	Eigen::Vector3f t_ = tgt_mean - src_mean, a_;		//? now initialize t_ with diff of mean and use this t_ to calc a_. (initialize t_ = 0 will result in chaos)
-	a_ = solveLLS(M, -(N * t_ + c)), t_ = solveLLS(N, -(M * a_ + c));
+	//Eigen::Vector3f t_ = tgt_mean - src_mean, a_;		//? now initialize t_ with diff of mean and use this t_ to calc a_. (initialize t_ = 0 will result in chaos)
+	Eigen::Vector3f t_(0, 0, 0), a_;
+	a_ = solveLLS(M, -(N * t_ + c));
+	t_ = solveLLS(N, -(M * a_ + c));
+	//cout << "t_: " << t_ << endl;
 
 
 	// 3. calculate transform matrix based on a_ and t_
@@ -140,11 +143,40 @@ void pasteWithCorrespondence(pcl::Correspondences& correspondences, Eigen::Matri
 	}
 }
 
-void findCorrespondences(pcl::PointCloud<pcl::PointNormal>::Ptr cloud_src, pcl::PointCloud<pcl::PointNormal>::Ptr cloud_tgt, pcl::Correspondences& correspondences)
+void findCorrespondences(pcl::PointCloud<pcl::PointNormal>::Ptr cloud_src, pcl::PointCloud<pcl::PointNormal>::Ptr cloud_tgt, pcl::Correspondences& correspondences, bool applyRejection/* = true*/)
 {
 	pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal> ce;
 	ce.setInputSource(cloud_src), ce.setInputTarget(cloud_tgt);
-	ce.determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
-																//x ce.determineCorrespondences(correspondences);
+	
+	if (applyRejection)
+		ce.determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
+	else
+		ce.determineCorrespondences(correspondences);
 }
 
+void deleteSomePoints(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, float deleteRatio, bool useHard)
+{
+	deleteRatio = std::min(1.0f, std::max(0.0f, deleteRatio));
+
+	if (!useHard)
+	{
+		// smoothing delete
+		for (int i = 0; i < cloud->points.size(); i++)
+		{
+			if (FRAND_RANGE01() < deleteRatio)
+			{
+				cloud->points.erase(cloud->points.begin() + i);
+				i--;
+			}
+		}
+		cloud->width = cloud->points.size();
+	}
+	else
+	{
+		// hard delete
+		cloud->points.erase(cloud->points.begin(), cloud->points.begin() + int(deleteRatio * cloud->points.size()));
+		cloud->width = cloud->points.size();
+	}
+
+	cout << "Points remaining: " << cloud->width << endl;
+}

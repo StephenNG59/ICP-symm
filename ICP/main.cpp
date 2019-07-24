@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "myicp.h"
+#include "func.h"
 
 using namespace std;
 
@@ -14,11 +15,10 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
-	// ----------------------------------------
-	// --------1. symmetric registration-------
-	// ----------------------------------------
 	if (string(argv[1]) == "--symm")
-	{
+	{	// ----------------------------------------
+		// --------1. symmetric registration-------
+		// ----------------------------------------
 		MyICP myicp;
 
 		// read files
@@ -53,19 +53,18 @@ int main(int argc, char** argv)
 		}
 
 		// register
-		cout << diff_t << max_it << endl;
 		Eigen::Affine3f guess = myicp.RegisterSymm(diff_t, max_it);
 
 		// visualize
 		myicp.Visualize();
 	}
+	else if (string(argv[1]) == "-t" || string(argv[1]) == "-td" || string(argv[1]) == "-tdh")
+	{	// ----------------------------------------
+		// --------2. transform--------------------
+		// ----------------------------------------
 
-	// ----------------------------------------
-	// --------2. transform--------------------
-	// ----------------------------------------
-	else if (string(argv[1]) == "-t")
-	{
-		if (argc != 11)
+		if ((string(argv[1]) == "-t" && argc != 11) 
+			|| ((string(argv[1]) == "-td" || string(argv[1]) == "-tdh") && argc != 12))
 		{
 			cerr << "Params not correct for transformation!" << endl;
 			help();
@@ -105,6 +104,16 @@ int main(int argc, char** argv)
 		transform.translation() << tx, ty, tz;
 		pcl::transformPointCloud(*cloud_src, *cloud_tgt, transform);
 
+		// delete some points
+		if (string(argv[1]) == "-td")
+		{
+			deleteSomePoints(cloud_tgt, atof(argv[11]), false);
+		}
+		else if (string(argv[1]) == "-tdh")
+		{
+			deleteSomePoints(cloud_tgt, atof(argv[11]), true);
+		}
+
 		// save file
 		if (ext2 == "pcd")
 		{
@@ -122,16 +131,65 @@ int main(int argc, char** argv)
 			help();
 			return -1;
 		}
+
+		// print transform matrix
+		cout << "Transformation suceeds!" << endl << transform.matrix() << endl;
+
+	}
+	else if (string(argv[1]) == "-cx" || string(argv[1]) == "-cy" || string(argv[1]) == "-cz")
+	{	// ----------------------------------------
+		// --------3. cut out some points----------
+		// ----------------------------------------
+		string f1 = string(argv[2]);
+		float xyz_ = atof(argv[4]);
+		pcl::PCLPointCloud2::Ptr pclcloud_src(new pcl::PCLPointCloud2);
+		pcl::PointCloud<PointT>::Ptr cloud_src(new pcl::PointCloud<PointT>());
+		pcl::PCDReader reader;
+		reader.read(f1, *pclcloud_src);
+		pcl::fromPCLPointCloud2(*pclcloud_src, *cloud_src);
+		if (string(argv[1]) == "-cx")
+		{
+			for (int i = 0; i < cloud_src->points.size(); i++)
+			{
+				if (cloud_src->points[i].x > xyz_)
+				{
+					cloud_src->points.erase(cloud_src->points.begin() + i);
+					i--;
+				}
+			}
+		}
+		else if (string(argv[1]) == "-cy")
+		{
+			for (int i = 0; i < cloud_src->points.size(); i++)
+			{
+				if (cloud_src->points[i].y > xyz_)
+				{
+					cloud_src->points.erase(cloud_src->points.begin() + i);
+					i--;
+				}
+			}
+		}
+		else if(string(argv[1]) == "-cz")
+		{
+			for (int i = 0; i < cloud_src->points.size(); i++)
+			{
+				if (cloud_src->points[i].z > xyz_)
+				{
+					cloud_src->points.erase(cloud_src->points.begin() + i);
+					i--;
+				}
+			}
+		}
+		
+		cloud_src->width = cloud_src->points.size();		//! remember to do this
+		pcl::io::savePCDFile(string(argv[3]), *cloud_src);
 	}
 
-
-	////transform
-	//float theta = M_PI / 4.0;
-	//Eigen::Affine3f transform = Eigen::Affine3f::Identity();
-	//transform.translation() << 2.5, 0.0, 0.0;
-	//transform.rotate(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitZ()));
-	//cout << "actual transform :" << endl
-	//	<< transform.matrix() << endl;
+	else
+	{
+		cerr << "Wrong option!" << endl;
+		return -1;
+	}
 	
 
 	// //save file
@@ -155,12 +213,24 @@ int main(int argc, char** argv)
 
 void help()
 {
-	cout<< "--Usage                                                                                         --" << endl
-		<< "--  --symm [source-pcd-file] [target-pcd-file] [optional: diff] [optional: max_iters]           --" << endl
-		<< "--    use symmetric object function to register source to target pcd point clouds               --" << endl
-		<< "--      e.g. ICP.exe --symm bunny.pcd bunny-out.pcd 0.1 50                                      --" << endl
-		<< "--  -t [source-pcd-file] [output-pcd-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z] --" << endl
-		<< "--    transform source pcd file and save the result in output pcd file                          --" << endl
-		<< "--      e.g. ICP.exe -t bunny.pcd bunny-out.pcd 0 0 1 30 2 2 -5                                 --" << endl
+	cout << "------------------------------------------------------------------------------------------------" << endl
+		<< "------------------------------------------[ Options ]-------------------------------------------" << endl
+		//<< "------------------------------------------------------------------------------------------------" << endl
+		<< "  --symm [source-file] [target-file] [optional: diff] [optional: max_iters]                     " << endl
+		<< "      use symmetric object function to REGISTER source to target point clouds                   " << endl
+		<< "  -t [source-file] [output-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z]           " << endl
+		<< "      TRANSFORM source file and save the result in output pcd file                              " << endl
+		<< "  -td [source] [output-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z] [ratio]       " << endl
+		<< "  -tdh [source] [output-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z] [ratio]      " << endl
+		<< "      TRANSFORM, meanwhile DELETE *ratio* of the origin points.                                 " << endl
+		<< "      *-td* for randomly deletion, *-tdh* for hard deletion of the front part                   " << endl
+		<< "  -cx/cy/cz [source] [output-file] xyz_cut                                                      " << endl
+		<< "      CUT OUT the points whose x/y/z coord is greater than *xyz_cut*                            " << endl
+		<< "------------------------------------------------------------------------------------------------" << endl
+		<< "    e.g. >ICP.exe --symm bunny-src.pcd bunny-tgt.pcd 0.1 50                                     " << endl
+		<< "    e.g. >ICP.exe -t bunny.pcd bunny-src-trans.pcd 1 0 1 30 10 -10 -5                           " << endl
+		<< "    e.g. >ICP.exe -td bunny.pcd bunny-src-delet.pcd 0 0 1 30 2 2 -5 0.4                         " << endl
+		<< "    e.g. >ICP.exe -cy bunny.pcd bunny-cuty.pcd 2     # if y > 2, delete this point              " << endl
+		<< "------------------------------------------------------------------------------------------------" << endl
 		<< endl;
 }

@@ -4,6 +4,7 @@
 
 constexpr int DEFAULT_MAX_ITERS = 500;
 constexpr float DEFAULT_DIFF_THRESH = 0.1f;
+constexpr int COUNT_MAX = 40;
 
 typedef pcl::PointXYZ PointT;
 
@@ -28,10 +29,12 @@ private:
 	int max_iters;
 	float diff_threshold;
 	Eigen::Affine3f guess_transform;
+	Eigen::Vector3f src_mean, tgt_mean;
 
 	pcl::PCLPointCloud2::Ptr pclcloud_src, pclcloud_tgt;
-	pcl::PointCloud<PointT>::Ptr cloud_src, cloud_tgt, cloud_apply;
-	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_src, cloud_pn_tgt, cloud_pn_med;
+	pcl::PointCloud<PointT>::Ptr cloud_src, cloud_tgt, cloud_src_demean, cloud_tgt_demean, cloud_apply;
+	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_src_demean, cloud_pn_tgt_demean, cloud_pn_med_demean;
 
+	void demean();
 	void estimateNormals();
 };

@@ -9,10 +9,12 @@ MyICP::MyICP() : max_iters(DEFAULT_MAX_ITERS), diff_threshold(DEFAULT_DIFF_THRES
 	pclcloud_tgt = pcl::PCLPointCloud2::Ptr(new pcl::PCLPointCloud2);
 	cloud_src = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
 	cloud_tgt = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
+	cloud_src_demean = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
+	cloud_tgt_demean = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
 	cloud_apply = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
-	cloud_pn_src = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
-	cloud_pn_tgt = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
-	cloud_pn_med = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
+	cloud_pn_src_demean = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
+	cloud_pn_tgt_demean = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
+	cloud_pn_med_demean = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
 }
 
 MyICP::~MyICP()
@@ -61,55 +63,92 @@ Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH
 	assert(cloud_src && cloud_tgt);
 	this->diff_threshold = diff_threshold, this->max_iters = max_iters;
 
-	// 0. estimate normals
+	// 0. demean (XYZ -> demean)
+	demean();
+
+
+	// 1. estimate normals (use demean XYZ, concatenate with normal)
 	estimateNormals();
 
-	// 1. copy src and tgt cloud into eigen matrix
+
+	// 2. copy demean src & tgt cloud into eigen matrix
 	Eigen::MatrixXf src_mat_xyz, src_mat_normal, tgt_mat_xyz, tgt_mat_normal;
-	pasteInMatrix(cloud_pn_src, src_mat_xyz, src_mat_normal);
-	pasteInMatrix(cloud_pn_tgt, tgt_mat_xyz, tgt_mat_normal);
+	pasteInMatrix(cloud_pn_src_demean, src_mat_xyz, src_mat_normal);
+	pasteInMatrix(cloud_pn_tgt_demean, tgt_mat_xyz, tgt_mat_normal);
 
-	// 2. initialize transform = Identity
-	Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 
-	// 3. iterates until convergence / max
-	int iters = 0;
-	float diff = evalDiff(src_mat_xyz, tgt_mat_xyz);
+	// 3. initialize transform = Identity
+	Eigen::Affine3f demean_transform = Eigen::Affine3f::Identity();
+
+
+	// 4. iterates until convergence / max
+	int iters = 0, count = 0;
+	//float diff = evalDiff(src_mat_xyz, tgt_mat_xyz);
+	float diff = diff_threshold + 1;
 	while (diff > this->diff_threshold && iters < this->max_iters)
 	{
-		if (iters++ % 20 == 0)
-			cout << "iters#" << iters << " - diff: " << diff << endl;
+		if (iters++ % 20 == 1)
+			cout << "[-] iters#" << iters - 1 << " - diff: " << diff << endl;
 
-		// 3.1. find correspondence
+		// 4.1. find correspondence
 		pcl::Correspondences correspondences;
-		findCorrespondences(cloud_pn_med, cloud_pn_tgt, correspondences);
+		findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, true);
+		if (correspondences.size() == 0)
+		{
+			findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, false);
+			cout << "[*] WARNING: point sets may not converge!" << endl;
+		}
 		
-		// 3.2. paste into new matrix based on correspondences
+		// 4.2. paste into new matrix based on correspondences
 		Eigen::MatrixXf src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor;
 		pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
 		pasteWithCorrespondence(correspondences, src_mat_normal, src_mat_normal_cor, tgt_mat_normal, tgt_mat_normal_cor);
 
-		// 3.3. estimate best transform from src_cor to tgt_cor
+		// 4.3. estimate best transform from src_cor to tgt_cor
 		Eigen::Affine3f incre_transform = estimateTransformSymm(src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor);
-		transform = incre_transform * transform;
+		demean_transform = incre_transform * demean_transform;
 
-		// 3.4. pad n*3 matrix to n*4 and apply transform
+		// 4.4. pad n*3 matrix to n*4 and apply transform
 		applyTransform(src_mat_xyz, src_mat_xyz, incre_transform);
 		applyTransform(src_mat_normal, src_mat_normal, incre_transform);
-		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med, *cloud_pn_med, incre_transform);
+		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, incre_transform);
 		//x cout << "  current transform" << endl << transform.matrix() << endl;
 
-		// 3.5. evaluate diff
-		diff = evalDiff(src_mat_xyz, tgt_mat_xyz);
-
+		// 4.5. evaluate diff
+		float next_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
+		if ((diff - next_diff) / diff < 0.001)
+			if (count++ > COUNT_MAX)
+			{
+				cerr << "[*] WARNING: seems like this cannot progress..." << endl;
+				break;
+			}
+		diff = next_diff;
 	}
 
-	// 4. print results
-	guess_transform = transform;
-	std::cout << "Result transform:" << endl
-		<< transform.matrix() << endl;
+	// print iters result
+	if (count > COUNT_MAX) ;
+	else if (diff > this->diff_threshold)
+		cout << "[*] WARNING: Max iterations reached!" << endl;
+	else
+		cout << "[*] SUCCESS: Difference reaches below threshold!" << endl;
+	cout << "[*] [ Iters#: " << iters << " - diff: " << diff << " ]" << endl;
 
-	return transform;
+
+	// 5. find un-demean transform
+	//! un-demean-transform = trans(tgt_mean) * demean-transform * trans(-src_mean)
+	Eigen::Affine3f undemean_transform = Eigen::Translation3f(tgt_mean) * demean_transform * Eigen::Translation3f(-src_mean) * Eigen::Affine3f::Identity();
+	//x undemean_transform.translate(-src_mean); 
+	//x undemean_transform = demean_transform * undemean_transform; 
+	//x undemean_transform.translate(tgt_mean);			// 这里虽然放在rotate的后面，但实际上和放在rotate前是一样的
+
+
+	// 6. print results
+	guess_transform = undemean_transform;
+	std::cout << "Guess transform:" << endl
+		<< guess_transform.matrix() << endl;
+
+
+	return guess_transform;
 }
 
 void MyICP::Visualize()
@@ -130,6 +169,43 @@ void MyICP::Visualize()
 	}
 }
 
+void MyICP::demean()
+{
+	//! resize, otherwise vector index out of range
+	//x cloud_src_deman->width = cloud_src->width
+	cloud_src_demean->resize(cloud_src->width);
+	cloud_tgt_demean->resize(cloud_tgt->width);
+	
+	this->src_mean = Eigen::Vector3f::Zero(), this->tgt_mean = Eigen::Vector3f::Zero();
+
+	for (int i = 0; i < cloud_src->width; i++)
+	{
+		this->src_mean[0] += cloud_src->points[i].x;
+		this->src_mean[1] += cloud_src->points[i].y;
+		this->src_mean[2] += cloud_src->points[i].z;
+	}
+	for (int i = 0; i < cloud_tgt->width; i++)
+	{
+		this->tgt_mean[0] += cloud_tgt->points[i].x;
+		this->tgt_mean[1] += cloud_tgt->points[i].y;
+		this->tgt_mean[2] += cloud_tgt->points[i].z;
+	}
+	src_mean /= cloud_src->width, tgt_mean /= cloud_tgt->width;
+
+	for (int i = 0; i < cloud_src->width; i++)
+	{
+		cloud_src_demean->points[i].x = cloud_src->points[i].x - this->src_mean[0];
+		cloud_src_demean->points[i].y = cloud_src->points[i].y - this->src_mean[1];
+		cloud_src_demean->points[i].z = cloud_src->points[i].z - this->src_mean[2];
+	}
+	for (int i = 0; i < cloud_tgt->width; i++)
+	{
+		cloud_tgt_demean->points[i].y = cloud_tgt->points[i].y - this->tgt_mean[1];
+		cloud_tgt_demean->points[i].z = cloud_tgt->points[i].z - this->tgt_mean[2];
+		cloud_tgt_demean->points[i].x = cloud_tgt->points[i].x - this->tgt_mean[0];
+	}
+}
+
 void MyICP::estimateNormals()
 {
 	pcl::PointCloud<pcl::Normal> normals_src, normals_tgt;
@@ -142,13 +218,13 @@ void MyICP::estimateNormals()
 	//x ne.setRadiusSearch(0.5);		// 0.5 is too narrow!
 	
 	// estimate
-	ne.setInputCloud(cloud_src);
+	ne.setInputCloud(cloud_src_demean);
 	ne.compute(normals_src);
-	ne.setInputCloud(cloud_tgt);
+	ne.setInputCloud(cloud_tgt_demean);
 	ne.compute(normals_tgt);
 
 	// concatenate
-	pcl::concatenateFields(*cloud_src, normals_src, *cloud_pn_src);
-	pcl::concatenateFields(*cloud_tgt, normals_tgt, *cloud_pn_tgt);
-	*cloud_pn_med = *cloud_pn_src;
+	pcl::concatenateFields(*cloud_src_demean, normals_src, *cloud_pn_src_demean);
+	pcl::concatenateFields(*cloud_tgt_demean, normals_tgt, *cloud_pn_tgt_demean);
+	*cloud_pn_med_demean = *cloud_pn_src_demean;
 }

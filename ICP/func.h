@@ -2,6 +2,8 @@
 
 #include "stdafx.h"
 
+#define FRAND_RANGE11() ((float)(rand() - rand()) / RAND_MAX)		/// -1 ~ 1
+#define FRAND_RANGE01() ((float)(rand()) / RAND_MAX)				/// 0 ~ 1
 
 void pasteInMatrix(const pcl::PointCloud<pcl::PointNormal>::Ptr cloud, Eigen::MatrixXf& mat_xyz, Eigen::MatrixXf& mat_normal);
 
@@ -35,5 +37,7 @@ void applyTransform(Eigen::MatrixXf& src, Eigen::MatrixXf& tgt, Eigen::Affine3f&
 void pasteWithCorrespondence(pcl::Correspondences& correspondences, Eigen::MatrixXf& src_mat, Eigen::MatrixXf& src_mat_cor, Eigen::MatrixXf& tgt_mat, Eigen::MatrixXf& tgt_mat_cor);
 
 
-void findCorrespondences(pcl::PointCloud<pcl::PointNormal>::Ptr cloud_src, pcl::PointCloud<pcl::PointNormal>::Ptr cloud_tgt, pcl::Correspondences& correspondences);
+void findCorrespondences(pcl::PointCloud<pcl::PointNormal>::Ptr cloud_src, pcl::PointCloud<pcl::PointNormal>::Ptr cloud_tgt, pcl::Correspondences& correspondences, bool applyRejection = true);
+
+void deleteSomePoints(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, float ratio, bool useHard = false);
 
