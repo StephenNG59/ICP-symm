@@ -9,6 +9,7 @@ MyICP::MyICP() : max_iters(DEFAULT_MAX_ITERS), diff_threshold(DEFAULT_DIFF_THRES
 	pclcloud_tgt = pcl::PCLPointCloud2::Ptr(new pcl::PCLPointCloud2);
 	cloud_src = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
 	cloud_tgt = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
+	cloud_apply = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
 	cloud_pn_src = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
 	cloud_pn_tgt = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
 	cloud_pn_med = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>);
@@ -18,9 +19,20 @@ MyICP::~MyICP()
 {
 }
 
-int MyICP::LoadCloud(std::string src_path, std::string tgt_path)
+int MyICP::LoadCloudPcd(std::string src_path, std::string tgt_path)
 {
 	pcl::PCDReader reader;
+	reader.read(src_path, *pclcloud_src);
+	pcl::fromPCLPointCloud2(*pclcloud_src, *cloud_src);
+	reader.read(tgt_path, *pclcloud_tgt);
+	pcl::fromPCLPointCloud2(*pclcloud_tgt, *cloud_tgt);
+
+	return 0;
+}
+
+int MyICP::LoadCloudObj(std::string src_path, std::string tgt_path)
+{
+	pcl::OBJReader reader;
 	reader.read(src_path, *pclcloud_src);
 	pcl::fromPCLPointCloud2(*pclcloud_src, *cloud_src);
 	reader.read(tgt_path, *pclcloud_tgt);
@@ -44,9 +56,10 @@ void MyICP::RegisterP2P()
 
 }
 
-Eigen::Affine3f MyICP::RegisterSymm()
+Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH*/, int max_iters/* = DEFAULT_MAX_ITERS*/)
 {
 	assert(cloud_src && cloud_tgt);
+	this->diff_threshold = diff_threshold, this->max_iters = max_iters;
 
 	// 0. estimate normals
 	estimateNormals();
@@ -60,12 +73,12 @@ Eigen::Affine3f MyICP::RegisterSymm()
 	Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 
 	// 3. iterates until convergence / max
-	float t = 0, time31 = 0, time32 = 0, time33 = 0, time34 = 0;
 	int iters = 0;
 	float diff = evalDiff(src_mat_xyz, tgt_mat_xyz);
-	while (diff > diff_threshold && iters++ < max_iters)
+	while (diff > this->diff_threshold && iters < this->max_iters)
 	{
-		cout << "iters#" << iters << " - diff: " << diff << endl;
+		if (iters++ % 20 == 0)
+			cout << "iters#" << iters << " - diff: " << diff << endl;
 
 		// 3.1. find correspondence
 		pcl::Correspondences correspondences;
@@ -92,10 +105,29 @@ Eigen::Affine3f MyICP::RegisterSymm()
 	}
 
 	// 4. print results
+	guess_transform = transform;
 	std::cout << "Result transform:" << endl
 		<< transform.matrix() << endl;
 
 	return transform;
+}
+
+void MyICP::Visualize()
+{
+	pcl::transformPointCloud(*cloud_src, *cloud_apply, guess_transform);
+
+	pcl::visualization::PointCloudColorHandlerCustom<PointT>
+		red_handler(cloud_src, 200, 20, 20), green_handler(cloud_tgt, 20, 200, 20), blue_handler(cloud_apply, 20, 20, 200);
+	pcl::visualization::PCLVisualizer viewer("Viewer#1");
+	viewer.setBackgroundColor(255, 255, 255);
+	viewer.addPointCloud(cloud_src, red_handler, "cloud1");
+	viewer.addPointCloud(cloud_tgt, green_handler, "cloud2");
+	viewer.addPointCloud(cloud_apply, blue_handler, "cloud3");
+
+	while (!viewer.wasStopped())
+	{
+		viewer.spinOnce();
+	}
 }
 
 void MyICP::estimateNormals()

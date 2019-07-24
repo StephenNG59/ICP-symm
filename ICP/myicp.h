@@ -2,7 +2,7 @@
 
 #include "stdafx.h"
 
-constexpr int DEFAULT_MAX_ITERS = 100;
+constexpr int DEFAULT_MAX_ITERS = 500;
 constexpr float DEFAULT_DIFF_THRESH = 0.1f;
 
 typedef pcl::PointXYZ PointT;
@@ -14,20 +14,23 @@ public:
 	~MyICP();
 
 public:
-	int LoadCloud(std::string src_path, std::string tgt_path);
+	int LoadCloudPcd(std::string src_path, std::string tgt_path);
+	int LoadCloudObj(std::string src_path, std::string tgt_path);
 	pcl::PointCloud<PointT>::Ptr GetSrcCloud();
 	pcl::PointCloud<PointT>::Ptr GetTgtCloud();
 
 	void RegisterP2P();
-	Eigen::Affine3f RegisterSymm();		// todo add params to specify iters & diff
+	Eigen::Affine3f RegisterSymm(float diff_threshold = DEFAULT_DIFF_THRESH, int max_iters = DEFAULT_MAX_ITERS);		// todo add params to specify iters & diff
+	void Visualize();
 
 
 private:
 	int max_iters;
 	float diff_threshold;
+	Eigen::Affine3f guess_transform;
 
 	pcl::PCLPointCloud2::Ptr pclcloud_src, pclcloud_tgt;
-	pcl::PointCloud<PointT>::Ptr cloud_src, cloud_tgt;
+	pcl::PointCloud<PointT>::Ptr cloud_src, cloud_tgt, cloud_apply;
 	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_src, cloud_pn_tgt, cloud_pn_med;
 
 	void estimateNormals();

@@ -52,6 +52,7 @@ void calculateMatrixNotation(const Eigen::MatrixXf& src_mat_xyz, const Eigen::Ma
 		p = src_mat_xyz.row(i), q = tgt_mat_xyz.row(i), n = src_mat_normal.row(i) + tgt_mat_normal.row(i);
 
 		// m_i = (src_demean_i + tgt_demean_i) ¡Á (src_normal_i + tgt_normal_i)
+		//? here positions are not demean!
 		M.row(i) = (p + q).cross(n);
 		// n_i = (src_normal_i + tgt_normal_i)
 		N.row(i) = n;
