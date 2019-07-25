@@ -1,4 +1,4 @@
-#include "stdafx.h"
+ï»¿#include "stdafx.h"
 
 #include "myicp.h"
 #include "func.h"
@@ -29,6 +29,8 @@ int MyICP::LoadCloudPcd(std::string src_path, std::string tgt_path)
 	reader.read(tgt_path, *pclcloud_tgt);
 	pcl::fromPCLPointCloud2(*pclcloud_tgt, *cloud_tgt);
 
+	cout << "[-] source pts: " << cloud_src->width << " || target pts: " << cloud_tgt->width << endl;
+
 	return 0;
 }
 
@@ -39,6 +41,8 @@ int MyICP::LoadCloudObj(std::string src_path, std::string tgt_path)
 	pcl::fromPCLPointCloud2(*pclcloud_src, *cloud_src);
 	reader.read(tgt_path, *pclcloud_tgt);
 	pcl::fromPCLPointCloud2(*pclcloud_tgt, *cloud_tgt);
+
+	cout << "[-] source pts: " << cloud_src->width << " || target pts: " << cloud_tgt->width << endl;
 
 	return 0;
 }
@@ -61,7 +65,8 @@ void MyICP::RegisterP2P()
 Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH*/, int max_iters/* = DEFAULT_MAX_ITERS*/)
 {
 	assert(cloud_src && cloud_tgt);
-	this->diff_threshold = diff_threshold, this->max_iters = max_iters;
+	float cloud_size = cloud_src->getMatrixXfMap().maxCoeff() - cloud_src->getMatrixXfMap().minCoeff();
+	this->diff_threshold = diff_threshold * cloud_size, this->max_iters = max_iters;
 
 	// 0. demean (XYZ -> demean)
 	demean();
@@ -81,41 +86,43 @@ Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH
 	Eigen::Affine3f demean_transform = Eigen::Affine3f::Identity();
 
 
-	// 4. iterates until convergence / max
+	// 4. initialize correspondences estimation
+	pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>::Ptr ce(new pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>());
+	pcl::search::KdTree<pcl::PointNormal>::Ptr src_tree(new pcl::search::KdTree<pcl::PointNormal>), tgt_tree(new pcl::search::KdTree<pcl::PointNormal>);
+	ce->setSearchMethodSource(src_tree), ce->setSearchMethodTarget(tgt_tree);
+
+
+	// 5. iterates until convergence / max
 	int iters = 0, count = 0;
 	//float diff = evalDiff(src_mat_xyz, tgt_mat_xyz);
 	float diff = diff_threshold + 1;
 	while (diff > this->diff_threshold && iters < this->max_iters)
 	{
-		if (iters++ % 20 == 1)
-			cout << "[-] iters#" << iters - 1 << " - diff: " << diff << endl;
 
-		// 4.1. find correspondence
+		// 5.1. find correspondence
 		pcl::Correspondences correspondences;
-		findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, true);
+		ce->setInputSource(cloud_pn_med_demean), ce->setInputTarget(cloud_pn_tgt_demean);
+		ce->determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
+		/*findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, true);
 		if (correspondences.size() == 0)
 		{
 			findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, false);
 			cout << "[*] WARNING: point sets may not converge!" << endl;
-		}
+		}*/
 		
-		// 4.2. paste into new matrix based on correspondences
+		// 5.2. paste into new matrix based on correspondences
 		Eigen::MatrixXf src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor;
 		pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
 		pasteWithCorrespondence(correspondences, src_mat_normal, src_mat_normal_cor, tgt_mat_normal, tgt_mat_normal_cor);
 
-		// 4.3. estimate best transform from src_cor to tgt_cor
-		Eigen::Affine3f incre_transform = estimateTransformSymm(src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor);
-		demean_transform = incre_transform * demean_transform;
-
-		// 4.4. pad n*3 matrix to n*4 and apply transform
-		applyTransform(src_mat_xyz, src_mat_xyz, incre_transform);
-		applyTransform(src_mat_normal, src_mat_normal, incre_transform);
-		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, incre_transform);
-		//x cout << "  current transform" << endl << transform.matrix() << endl;
-
-		// 4.5. evaluate diff
+		// 5.3. evaluate diff
+		//! bring it to here
 		float next_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
+		if (next_diff < diff_threshold)
+		{
+			diff = next_diff;
+			break;
+		}
 		if ((diff - next_diff) / diff < 0.001)
 			if (count++ > COUNT_MAX)
 			{
@@ -123,15 +130,42 @@ Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH
 				break;
 			}
 		diff = next_diff;
+		//! bring it to here
+		if (iters == 0 || iters % 10 == 1)
+			cout << "[ ] iters#" << std::right << setw(3) << iters << " - diff: " << diff / cloud_size * 1000 << "â€°" << endl;
+		iters++;
+
+		// 5.4. estimate best transform from src_cor to tgt_cor
+		Eigen::Affine3f incre_transform = estimateTransformSymm(src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor);
+		demean_transform = incre_transform * demean_transform;
+
+		// 5.5. pad n*3 matrix to n*4 and apply transform
+		applyTransform(src_mat_xyz, src_mat_xyz, incre_transform);
+		applyTransform(src_mat_normal, src_mat_normal, incre_transform);
+		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, incre_transform);
+		//x cout << "  current transform" << endl << transform.matrix() << endl;
+
+
+		//! visualization for test!
+		//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
+		//	red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean, 20, 20, 200);
+		//pcl::visualization::PCLVisualizer viewer("Viewer#1");
+		//viewer.setBackgroundColor(255, 255, 255);
+		////viewer.addPointCloud(cloud_pn_src_demean, red_handler, "cloud1");
+		//viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
+		//viewer.addPointCloud(cloud_pn_med_demean, blue_handler, "cloud3");
+		//while (!viewer.wasStopped()) viewer.spinOnce();
+
 	}
 
 	// print iters result
 	if (count > COUNT_MAX) ;
-	else if (diff > this->diff_threshold)
+	//else if (diff > this->diff_threshold)
+	else if (iters == this->max_iters)
 		cout << "[*] WARNING: Max iterations reached!" << endl;
 	else
 		cout << "[*] SUCCESS: Difference reaches below threshold!" << endl;
-	cout << "[*] [ Iters#: " << iters << " - diff: " << diff << " ]" << endl;
+	cout << "[*] [ Iters#: " << iters << " - diff: " << diff / cloud_size * 1000 << "â€° ]" << endl;
 
 
 	// 5. find un-demean transform
@@ -139,7 +173,7 @@ Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH
 	Eigen::Affine3f undemean_transform = Eigen::Translation3f(tgt_mean) * demean_transform * Eigen::Translation3f(-src_mean) * Eigen::Affine3f::Identity();
 	//x undemean_transform.translate(-src_mean); 
 	//x undemean_transform = demean_transform * undemean_transform; 
-	//x undemean_transform.translate(tgt_mean);			// ÕâÀïËäÈ»·ÅÔÚrotateµÄºóÃæ£¬µ«Êµ¼ÊÉÏºÍ·ÅÔÚrotateÇ°ÊÇÒ»ÑùµÄ
+	//x undemean_transform.translate(tgt_mean);			// è¿™é‡Œè™½ç„¶æ”¾åœ¨rotateçš„åŽé¢ï¼Œä½†å®žé™…ä¸Šå’Œæ”¾åœ¨rotateå‰æ˜¯ä¸€æ ·çš„
 
 
 	// 6. print results
@@ -151,7 +185,7 @@ Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH
 	return guess_transform;
 }
 
-void MyICP::Visualize()
+void MyICP::Visualize(bool showOnce /*= false*/)
 {
 	pcl::transformPointCloud(*cloud_src, *cloud_apply, guess_transform);
 
@@ -163,10 +197,10 @@ void MyICP::Visualize()
 	viewer.addPointCloud(cloud_tgt, green_handler, "cloud2");
 	viewer.addPointCloud(cloud_apply, blue_handler, "cloud3");
 
-	while (!viewer.wasStopped())
-	{
+	if (showOnce)
 		viewer.spinOnce();
-	}
+	else
+		while (!viewer.wasStopped()) viewer.spinOnce();
 }
 
 void MyICP::demean()

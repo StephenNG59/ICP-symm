@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <iomanip>								// io ¶ÔÆë
 #include <vector>
 #include <string>
 #include <assert.h>
@@ -16,6 +17,7 @@
 #include <pcl/common/transforms.h>
 #include <pcl/features/normal_3d.h>				// normal estimation
 #include <pcl/registration/correspondence_estimation.h>
+#include <pcl/registration/icp.h>				// iterative closest point
 
 #include <boost/algorithm/string.hpp>			// split
 

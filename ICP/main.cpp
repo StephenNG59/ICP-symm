@@ -41,14 +41,23 @@ int main(int argc, char** argv)
 		}
 
 		// params
+		bool showOnce = false;
 		float diff_t = DEFAULT_DIFF_THRESH;
 		int max_it = DEFAULT_MAX_ITERS;
 		if (argc >= 5)
 		{
-			diff_t = atof(argv[4]);
-			if (argc >= 6)
+			if (string(argv[4]) == "--show-once")
+				showOnce = true;
+			else
 			{
-				max_it = atoi(argv[5]);
+				max_it = atof(argv[4]);
+				if (argc >= 6)
+				{
+					if (string(argv[5]) == "--show-once")
+						showOnce = true;
+					else
+						diff_t = atoi(argv[5]);
+				}
 			}
 		}
 
@@ -56,7 +65,57 @@ int main(int argc, char** argv)
 		Eigen::Affine3f guess = myicp.RegisterSymm(diff_t, max_it);
 
 		// visualize
-		myicp.Visualize();
+		myicp.Visualize(showOnce);
+	}
+	else if (string(argv[1]) == "--p2p")
+	{
+		// read files
+		pcl::PointCloud<PointT>::Ptr cloud_src(new pcl::PointCloud<PointT>()), cloud_tgt(new pcl::PointCloud<PointT>()), cloud_guess(new pcl::PointCloud<PointT>());
+		
+		pcl::PCDReader reader;
+		reader.read(string(argv[2]), *cloud_src);
+		reader.read(string(argv[3]), *cloud_tgt);
+
+		// get params
+		int max_iters = 500;
+		bool showOnce = false;
+		if (argc >= 5)
+		{
+			if (string(argv[4]) == "--show-once")
+				showOnce = true;
+			else
+			{
+				max_iters = atoi(argv[4]);
+				if (argc >= 6 && string(argv[5]) == "--show-once")
+					showOnce = true;
+			}
+		}
+
+		// icp
+		pcl::IterativeClosestPoint<PointT, PointT> icp;
+		icp.setInputSource(cloud_src);
+		icp.setInputTarget(cloud_tgt);
+		icp.setMaximumIterations(max_iters);
+		icp.setEuclideanFitnessEpsilon(0.0001);
+		icp.align(*cloud_guess);
+		Eigen::Matrix4f transform = icp.getFinalTransformation();
+
+		// print result
+		cout << "Final transform" << endl << transform << endl;
+
+		// visualize
+		pcl::visualization::PointCloudColorHandlerCustom<PointT>
+			red_handler(cloud_src, 200, 20, 20), green_handler(cloud_tgt, 20, 200, 20), blue_handler(cloud_guess, 20, 20, 200);
+		pcl::visualization::PCLVisualizer viewer("Viewer#1");
+		viewer.setBackgroundColor(255, 255, 255);
+		viewer.addPointCloud(cloud_src, red_handler, "cloud1");
+		viewer.addPointCloud(cloud_tgt, green_handler, "cloud2");
+		viewer.addPointCloud(cloud_guess, blue_handler, "cloud3");
+
+		if (showOnce)
+			viewer.spinOnce();
+		else
+			while (!viewer.wasStopped()) viewer.spinOnce();
 	}
 	else if (string(argv[1]) == "-t" || string(argv[1]) == "-td" || string(argv[1]) == "-tdh")
 	{	// ----------------------------------------
@@ -216,7 +275,7 @@ void help()
 	cout << "------------------------------------------------------------------------------------------------" << endl
 		<< "------------------------------------------[ Options ]-------------------------------------------" << endl
 		//<< "------------------------------------------------------------------------------------------------" << endl
-		<< "  --symm [source-file] [target-file] [optional: diff] [optional: max_iters]                     " << endl
+		<< "  --symm [source-file] [target-file] [optional: max_iters] [optional: diff]                     " << endl
 		<< "      use symmetric object function to REGISTER source to target point clouds                   " << endl
 		<< "  -t [source-file] [output-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z]           " << endl
 		<< "      TRANSFORM source file and save the result in output pcd file                              " << endl
@@ -227,7 +286,8 @@ void help()
 		<< "  -cx/cy/cz [source] [output-file] xyz_cut                                                      " << endl
 		<< "      CUT OUT the points whose x/y/z coord is greater than *xyz_cut*                            " << endl
 		<< "------------------------------------------------------------------------------------------------" << endl
-		<< "    e.g. >ICP.exe --symm bunny-src.pcd bunny-tgt.pcd 0.1 50                                     " << endl
+		<< "    e.g. >ICP.exe --symm bunny-src.pcd bunny-tgt.pcd 50 0.001                                   " << endl
+		<< "    e.g. >ICP.exe --p2p bunny-src.pcd bunny-tgt.pcd 10 --show-once                              " << endl
 		<< "    e.g. >ICP.exe -t bunny.pcd bunny-src-trans.pcd 1 0 1 30 10 -10 -5                           " << endl
 		<< "    e.g. >ICP.exe -td bunny.pcd bunny-src-delet.pcd 0 0 1 30 2 2 -5 0.4                         " << endl
 		<< "    e.g. >ICP.exe -cy bunny.pcd bunny-cuty.pcd 2     # if y > 2, delete this point              " << endl

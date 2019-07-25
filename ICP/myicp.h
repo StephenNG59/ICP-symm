@@ -2,8 +2,8 @@
 
 #include "stdafx.h"
 
-constexpr int DEFAULT_MAX_ITERS = 500;
-constexpr float DEFAULT_DIFF_THRESH = 0.1f;
+constexpr int DEFAULT_MAX_ITERS = 200;
+constexpr float DEFAULT_DIFF_THRESH = 0.001f;
 constexpr int COUNT_MAX = 40;
 
 typedef pcl::PointXYZ PointT;
@@ -21,8 +21,8 @@ public:
 	pcl::PointCloud<PointT>::Ptr GetTgtCloud();
 
 	void RegisterP2P();
-	Eigen::Affine3f RegisterSymm(float diff_threshold = DEFAULT_DIFF_THRESH, int max_iters = DEFAULT_MAX_ITERS);		// todo add params to specify iters & diff
-	void Visualize();
+	Eigen::Affine3f RegisterSymm(float diff_threshold = DEFAULT_DIFF_THRESH, int max_iters = DEFAULT_MAX_ITERS);
+	void Visualize(bool showOnce = false);
 
 
 private:

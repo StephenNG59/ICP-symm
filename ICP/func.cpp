@@ -35,7 +35,7 @@ float evalDiff(const Eigen::MatrixXf& src, const Eigen::MatrixXf& tgt)
 // calculate diff of two point sets in matrix [m * n]. m is #points, n is #dimensions. src and tgt is corresponded based on indices.
 float evalDiff(const Eigen::MatrixXf& src, const Eigen::MatrixXf& tgt, const std::vector<int>& indices)
 {
-	// todo complete this
+	// todo complete this evalDiff
 	return 0.f;
 }
 
@@ -99,13 +99,15 @@ Eigen::Affine3f estimateTransformSymm(const Eigen::MatrixXf& src_mat_xyz, const 
 	// ------------------------------------------------
 	Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 	// ¦È = arctan(||a_||)
+	//todo add random choosing? (temperature?)
 	float theta = atan(a_.norm());
 	//! transform = rot(¦È, a_) * trans(t_ * ¦È) * rot(¦È, a_)
+	transform = Eigen::AngleAxisf(theta, a_ / a_.norm()) * Eigen::Translation3f(t_ * cos(theta)) * Eigen::AngleAxisf(theta, a_ / a_.norm()) * transform;
 	//x transform = trans(tgt_mean) * rot(¦È, a_) * trans(t_ * ¦È) * rot(¦È, a_) * trans(-src_mean)
 	//x transform.translate(-src_mean);
-	transform.rotate(Eigen::AngleAxisf(theta, a_ / a_.norm()));
-	transform.translate(t_ * cos(theta));
-	transform.rotate(Eigen::AngleAxisf(theta, a_ / a_.norm()));
+	//x transform.rotate(Eigen::AngleAxisf(theta, a_ / a_.norm()));
+	//x transform.translate(t_ * cos(theta));
+	//x transform.rotate(Eigen::AngleAxisf(theta, a_ / a_.norm()));
 	//x transform.translate(tgt_mean);
 
 	return transform;
@@ -143,16 +145,16 @@ void pasteWithCorrespondence(pcl::Correspondences& correspondences, Eigen::Matri
 	}
 }
 
-void findCorrespondences(pcl::PointCloud<pcl::PointNormal>::Ptr cloud_src, pcl::PointCloud<pcl::PointNormal>::Ptr cloud_tgt, pcl::Correspondences& correspondences, bool applyRejection/* = true*/)
+void findCorrespondences(pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>::Ptr ce, pcl::PointCloud<pcl::PointNormal>::Ptr cloud_src, pcl::PointCloud<pcl::PointNormal>::Ptr cloud_tgt, pcl::Correspondences& correspondences, bool applyRejection/* = true*/)
 {
-	pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal> ce;
-	ce.setInputSource(cloud_src), ce.setInputTarget(cloud_tgt);
-	
+	ce->setInputSource(cloud_src), ce->setInputTarget(cloud_tgt);
+
 	if (applyRejection)
-		ce.determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
+		ce->determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
 	else
-		ce.determineCorrespondences(correspondences);
+		ce->determineCorrespondences(correspondences);
 }
+
 
 void deleteSomePoints(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, float deleteRatio, bool useHard)
 {
