@@ -28,19 +28,25 @@ int MyICP::LoadCloudFiles(std::string src_path, std::string tgt_path)
 	
 	std::string ext1 = src_path.substr(src_path.find_last_of('.') + 1);
 	if (ext1 == "pcd")
-		pcdReader.read(src_path, *cloud_src);
+	{
+		if (pcdReader.read(src_path, *cloud_src) < 0) return -1;
+	}
 	else if (ext1 == "obj")
-		objReader.read(src_path, *cloud_src);
-	else
-		return -1;
+	{
+		if (objReader.read(src_path, *cloud_src) < 0) return -1;
+	}
+	else return -1;
 
 	std::string ext2 = tgt_path.substr(tgt_path.find_last_of('.') + 1);
 	if (ext2 == "pcd")
-		pcdReader.read(tgt_path, *cloud_tgt);
+	{
+		if (pcdReader.read(tgt_path, *cloud_tgt) < 0) return -1;
+	}
 	else if (ext2 == "obj")
-		objReader.read(tgt_path, *cloud_tgt);
-	else
-		return -1;
+	{
+		if (objReader.read(tgt_path, *cloud_tgt) < 0) return -1;
+	}
+	else return -1;
 
 	cout << "[-] source pts: " << cloud_src->width << " || target pts: " << cloud_tgt->width << endl;
 
@@ -69,7 +75,7 @@ void MyICP::Visualize(bool showOnce /*= false*/)
 
 void MyICP::SetSymmParams(int maxIters, float diffThreshold, int guessTimes)
 {
-	this->maxIters = maxIters, this->diffThreshold = diffThreshold, this->guess_times = guessTimes;
+	this->maxIters = maxIters, this->diffThreshold = diffThreshold, this->guess_times = guessTimes, this->maxCounts = 0.5 * maxIters;
 }
 
 Eigen::Affine3f MyICP::RegisterSymm()
@@ -135,10 +141,18 @@ Eigen::Affine3f MyICP::RegisterSymm()
 			diff = next_diff;
 			break;
 		}
-		if ((diff - next_diff) / diff < 0.001 && ++count > COUNT_MAX)
+		if (next_diff > diff)
 		{
-			cerr << "[*] WARNING: seems like this cannot progress..." << endl;
-			break;
+			count += iters / 8;										// punishment for negative-progress will increase
+		}
+		else
+		{
+			count += std::min(5.0f, (diffTScale / 50) / (diff - next_diff));		// as the progress becomes smaller, the count speed becomes more rapidly
+			if (count > this->maxCounts)
+			{
+				cerr << "[*] WARNING: seems like this cannot progress anymore..." << endl;
+				break;
+			}
 		}
 		diff = next_diff;
 		if (iters == 0 || iters % 10 == 1)
@@ -168,7 +182,7 @@ Eigen::Affine3f MyICP::RegisterSymm()
 
 
 	// print iters result
-	if (count > COUNT_MAX) ;
+	if (count > this->maxCounts) ;
 	else if (iters == this->maxIters)
 		cout << "[*] WARNING: Max iterations reached!" << endl;
 	else
@@ -207,6 +221,11 @@ Eigen::Affine3f MyICP::RegisterP2P()
 	this->guess_transform = Eigen::Affine3f(icp.getFinalTransformation());
 
 	return this->guess_transform;
+}
+
+void MyICP::SetUsePca(bool usePca)
+{
+	this->usePca = usePca;
 }
 
 
@@ -303,9 +322,62 @@ Eigen::Affine3f MyICP::getInitTransform()
 	//viewer.addPointCloud(cloud_pn_med_demean, blue_handler, "cloud3");
 	//while (!viewer.wasStopped()) viewer.spinOnce();
 
-	// 4.2. initialize transform with random guesses
+	// initialize transform with PCA
+	if (this->usePca)
+	{
+		std::vector<Eigen::Vector4f> src, tgt;
+		get3Dpca(this->src_mat_xyz, src), get3Dpca(this->tgt_mat_xyz, tgt);
+
+		// todo compress codes that are same with random guess #1
+		bool isUpdated = false;
+		float min_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
+		Eigen::MatrixXf src_mat_xyz_guess = src_mat_xyz;
+		pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_med_demean_guess(new pcl::PointCloud<pcl::PointNormal>);
+
+		for (int i = 0; i < 4; i++)
+		{
+			Eigen::Affine3f guess_demean_transform = getRotateMatrix(src, tgt, i / 2 >= 1, i % 2 / 1 >= 1);
+			applyTransform(src_mat_xyz, src_mat_xyz_guess, guess_demean_transform);
+
+			pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean_guess, guess_demean_transform);
+			findCorrespondences(this->ce, cloud_pn_med_demean_guess, this->cloud_pn_tgt_demean, this->correspondences);
+
+			Eigen::MatrixXf src_mat_xyz_cor_guess, tgt_mat_xyz_cor_guess;
+			pasteWithCorrespondence(correspondences, src_mat_xyz_guess, src_mat_xyz_cor_guess, tgt_mat_xyz, tgt_mat_xyz_cor_guess);	//! 这里第2个参数要带 _guess 的！
+
+			//! visualization for test!
+			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
+				red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean_guess, 20, 20, 200);
+			pcl::visualization::PCLVisualizer viewer("Viewer#1");
+			viewer.setBackgroundColor(255, 255, 255);
+			viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
+			viewer.addPointCloud(cloud_pn_med_demean_guess, blue_handler, "cloud3");
+			while (!viewer.wasStopped()) viewer.spinOnce();
+
+			float new_diff = evalDiff(src_mat_xyz_cor_guess, tgt_mat_xyz_cor_guess);
+			int new_cor_num = correspondences.size();
+
+			if (new_cor_num > max_cor_num && new_diff < min_diff)
+			{
+				isUpdated = true;
+				min_diff = new_diff;
+				max_cor_num = new_cor_num;
+				demean_transform = guess_demean_transform;
+			}
+		}
+		
+		if (isUpdated)
+		{
+			pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, demean_transform);
+			applyTransform(this->src_mat_xyz, this->src_mat_xyz, demean_transform);
+			applyTransform(this->src_mat_normal, this->src_mat_normal, demean_transform);
+		}
+	}
+
+	// initialize transform with random guesses
 	if (this->guess_times > 0)
 	{
+		// todo compress codes that are same with pca #2
 		bool isUpdated = false;
 		float min_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
 		Eigen::MatrixXf src_mat_xyz_guess = src_mat_xyz;
@@ -356,10 +428,11 @@ Eigen::Affine3f MyICP::getInitTransform()
 		if (isUpdated)
 		{
 			pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, demean_transform);
-			applyTransform(src_mat_xyz, src_mat_xyz, demean_transform);
-			applyTransform(src_mat_normal, src_mat_normal, demean_transform);
+			applyTransform(this->src_mat_xyz, this->src_mat_xyz, demean_transform);
+			applyTransform(this->src_mat_normal, this->src_mat_normal, demean_transform);
 		}
 	}
 
 	return demean_transform;
 }
+

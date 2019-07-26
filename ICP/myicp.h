@@ -2,9 +2,9 @@
 
 #include "stdafx.h"
 
-constexpr int DEFAULT_MAX_ITERS = 200;
+constexpr int DEFAULT_MAX_ITERS = 50;
 constexpr float DEFAULT_DIFF_THRESH = 0.001f;
-constexpr int COUNT_MAX = 40;				// 迭代不理想的次数，到达次数后自动退出
+constexpr int COUNT_MAX = 30;				// 迭代不理想的次数，到达次数后自动退出
 constexpr int DEFAULT_GUESS_TIMES = 0;
 constexpr float DIFF_TOLERANCE = 0.08;		// 新的guess的diff必须比目前最好的guess的diff大不超过0.05
 constexpr float MIN_COR_RATIO = 0.01;		// 带有rejection的correspondence最少要有原先的0.1的点
@@ -29,12 +29,15 @@ public:
 	Eigen::Affine3f RegisterSymm();
 	void SetP2pParams(int maxIters);
 	Eigen::Affine3f RegisterP2P();
+	void SetUsePca(bool usePca);
 
 
 private:
 	int maxIters;
 	float diffThreshold;
 	int guess_times;
+	bool usePca = false;
+	int maxCounts = COUNT_MAX;
 
 	Eigen::Affine3f guess_transform;
 

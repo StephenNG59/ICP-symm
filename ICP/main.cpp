@@ -69,19 +69,57 @@ void getP2pParams(int argc, char** argv, bool& showOnce, int& maxIters)
 	}
 }
 
+void runPCAtest()
+{
+	float p[5][3] = {
+			{0, 7, 2},
+			{0, 1, 0},
+			{0, -1, 0},
+			{0, 2, 0},
+			{0, -2, 0},
+	};
+
+	float q[5][3] = {
+		{7, 0, 2},
+		{1, 0, 0},
+		{-1, 0, 0},
+		{2, 0, 0},
+		{-2, 0, 0},
+	};
+
+	Eigen::MatrixXf P(5, 3), Q(5, 3);
+	for (size_t i = 0; i < 5; i++)
+	{
+		for (size_t j = 0; j < 3; j++)
+		{
+			P(i, j) = p[i][j];
+			Q(i, j) = q[i][j];
+		}
+	}
+
+	vector<Eigen::Vector4f> eig_p, eig_q;
+	get3Dpca(P, eig_p);
+	get3Dpca(Q, eig_q);
+
+	Eigen::Affine3f r = getRotateMatrix(eig_p, eig_q);
+
+	cout << "r" << endl << r.matrix() << endl;
+}
+
 int main(int argc, char** argv)
 {
 	srand((int)time(0));
 
-	if (argc <= 3)
+	if (argc <= 1)
 	{
 		help();
 		return 0;
 	}
 
-	// ---------- registration : symmectric / point-to-point(umeyama) ---------
-	if (string(argv[1]).substr(0, 6) == "--symm" || string(argv[1]) == "--p2p")
+	if (string(argv[1]).substr(0, 6) == "--symm" || string(argv[1]) == "--p2p" || string(argv[1]) == "--pca")
 	{
+		/* ---------- registration : symmectric / point-to-point(umeyama) --------- */
+
 		MyICP myicp;
 
 		// read files
@@ -97,11 +135,12 @@ int main(int argc, char** argv)
 		float diffThreshold = DEFAULT_DIFF_THRESH;
 
 		// get params and register
-		if (string(argv[1]).substr(0, 6) == "--symm")
+		if (string(argv[1]).substr(0, 6) == "--symm" || string(argv[1]) == "--pca")
 		{
 			// get params
 			getSymmParams(argc, argv, showOnce, maxIters, diffThreshold, guessTimes);
 			myicp.SetSymmParams(maxIters, diffThreshold, guessTimes);
+			myicp.SetUsePca(string(argv[1]) == "--pca");
 			
 			// register
 			Eigen::Affine3f guess = myicp.RegisterSymm();
@@ -121,10 +160,10 @@ int main(int argc, char** argv)
 		// visualize
 		myicp.Visualize(showOnce);
 	}
-	
-	// ----------------- transform -------------------
 	else if (string(argv[1]) == "-t" || string(argv[1]) == "-td" || string(argv[1]) == "-tdh")
 	{
+		/* ----------------- transform ------------------- */
+
 		if ((string(argv[1]) == "-t" && argc != 11) 
 			|| ((string(argv[1]) == "-td" || string(argv[1]) == "-tdh") && argc != 12))
 		{
@@ -198,10 +237,10 @@ int main(int argc, char** argv)
 		cout << "Transformation suceeds!" << endl << transform.matrix() << endl;
 
 	}
-
-	// ----------------- cut out some points -------------------
 	else if (string(argv[1]) == "-cx" || string(argv[1]) == "-cy" || string(argv[1]) == "-cz")
 	{	
+		/* ----------------- cut out some points ------------------- */
+
 		string f1 = string(argv[2]);
 		float xyz_ = atof(argv[4]);
 		pcl::PCLPointCloud2::Ptr pclcloud_src(new pcl::PCLPointCloud2);
@@ -246,7 +285,6 @@ int main(int argc, char** argv)
 		cloud_src->width = cloud_src->points.size();		//! remember to do this
 		pcl::io::savePCDFile(string(argv[3]), *cloud_src);
 	}
-
 	else
 	{
 		cerr << "Wrong option!" << endl;

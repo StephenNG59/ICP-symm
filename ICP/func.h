@@ -54,3 +54,15 @@ void deleteSomePoints(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, float ratio, bo
 
 
 Eigen::Affine3f getRandomRotate();
+
+
+/*
+	mat: m * 3 matrix
+*/
+void get3Dpca(const Eigen::MatrixXf& mat, std::vector<Eigen::Vector4f>& vecs);
+
+bool eigenGreater(const Eigen::Vector4f& eig1, const Eigen::Vector4f& eig2);
+
+Eigen::Affine3f getRotateMatrix(const std::vector<Eigen::Vector4f>& srcEigenValtor, const std::vector<Eigen::Vector4f>& tgtEigenValtor, bool reverse1 = false, bool reverse2 = false);
+
+float getTheta(Eigen::Vector3f& axis, const Eigen::Vector3f& src, const Eigen::Vector3f& tgt);
