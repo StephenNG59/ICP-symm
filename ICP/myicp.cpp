@@ -3,10 +3,8 @@
 #include "myicp.h"
 #include "func.h"
 
-MyICP::MyICP() : max_iters(DEFAULT_MAX_ITERS), diff_threshold(DEFAULT_DIFF_THRESH), guess_times()
+MyICP::MyICP() : maxIters(DEFAULT_MAX_ITERS), diffThreshold(DEFAULT_DIFF_THRESH), guess_times()
 {
-	pclcloud_src = pcl::PCLPointCloud2::Ptr(new pcl::PCLPointCloud2);
-	pclcloud_tgt = pcl::PCLPointCloud2::Ptr(new pcl::PCLPointCloud2);
 	cloud_src = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
 	cloud_tgt = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
 	cloud_src_demean = pcl::PointCloud<PointT>::Ptr(new pcl::PointCloud<PointT>);
@@ -21,277 +19,32 @@ MyICP::~MyICP()
 {
 }
 
-int MyICP::LoadCloudPcd(std::string src_path, std::string tgt_path)
+// ---------------------
+
+int MyICP::LoadCloudFiles(std::string src_path, std::string tgt_path)
 {
-	pcl::PCDReader reader;
-	reader.read(src_path, *pclcloud_src);
-	pcl::fromPCLPointCloud2(*pclcloud_src, *cloud_src);
-	reader.read(tgt_path, *pclcloud_tgt);
-	pcl::fromPCLPointCloud2(*pclcloud_tgt, *cloud_tgt);
-
-	cout << "[-] source pts: " << cloud_src->width << " || target pts: " << cloud_tgt->width << endl;
-
-	return 0;
-}
-
-int MyICP::LoadCloudObj(std::string src_path, std::string tgt_path)
-{
-	pcl::OBJReader reader;
-	reader.read(src_path, *pclcloud_src);
-	pcl::fromPCLPointCloud2(*pclcloud_src, *cloud_src);
-	reader.read(tgt_path, *pclcloud_tgt);
-	pcl::fromPCLPointCloud2(*pclcloud_tgt, *cloud_tgt);
-
-	cout << "[-] source pts: " << cloud_src->width << " || target pts: " << cloud_tgt->width << endl;
-
-	return 0;
-}
-
-pcl::PointCloud<PointT>::Ptr MyICP::GetSrcCloud()
-{
-	return this->cloud_src;
-}
-
-pcl::PointCloud<PointT>::Ptr MyICP::GetTgtCloud()
-{
-	return this->cloud_tgt;
-}
-
-void MyICP::RegisterP2P()
-{
-
-}
-
-Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH*/, int max_iters/* = DEFAULT_MAX_ITERS*/)
-{
-	assert(cloud_src && cloud_tgt);
-	float cloud_size = cloud_src->getMatrixXfMap().maxCoeff() - cloud_src->getMatrixXfMap().minCoeff();
-	this->diff_threshold = diff_threshold * cloud_size, this->max_iters = max_iters;
-
-	// 0. demean (XYZ -> demean)
-	demean();
-
-	// 1. estimate normals (use demean XYZ, concatenate with normal)
-	estimateNormals();
-
-
-	#pragma region 2.copy demean src & tgt cloud into eigen matrix
-	// 2. copy demean src & tgt cloud into eigen matrix
-	Eigen::MatrixXf src_mat_xyz, src_mat_normal, tgt_mat_xyz, tgt_mat_normal;
-	pasteInMatrix(cloud_pn_src_demean, src_mat_xyz, src_mat_normal);
-	pasteInMatrix(cloud_pn_tgt_demean, tgt_mat_xyz, tgt_mat_normal);
-	#pragma endregion
-
-
-	#pragma region 3. initialize correspondences estimation
-	// 3. initialize correspondences estimation
-	pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>::Ptr ce(new pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>());
-	//x pcl::registration::CorrespondenceEstimationNormalShooting<pcl::PointNormal, pcl::PointNormal, pcl::PointNormal>::Ptr ceee(new pcl::registration::CorrespondenceEstimationNormalShooting<pcl::PointNormal, pcl::PointNormal, pcl::PointNormal>);
-	pcl::search::KdTree<pcl::PointNormal>::Ptr src_tree(new pcl::search::KdTree<pcl::PointNormal>), tgt_tree(new pcl::search::KdTree<pcl::PointNormal>);
-	ce->setSearchMethodSource(src_tree), ce->setSearchMethodTarget(tgt_tree);
-	pcl::Correspondences correspondences;
-	#pragma endregion
-
-
-	#pragma region 4. initialize transform = Identity
-	// 4. initialize transform = Identity
-	Eigen::Affine3f demean_transform = Eigen::Affine3f::Identity();
-	ce->setInputSource(cloud_pn_med_demean), ce->setInputTarget(cloud_pn_tgt_demean);
-	ce->determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
-	//ce->determineCorrespondences(correspondences);
-	int max_cor_num = correspondences.size();
-	cout << "Init correspondences points: " << max_cor_num << endl;
+	pcl::PCDReader pcdReader;
+	pcl::OBJReader objReader;
 	
-	Eigen::MatrixXf src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor;
-	pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
-	
-	// 4.2. initialize transform with random guesses
-	float min_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
-	Eigen::MatrixXf src_mat_xyz_guess = src_mat_xyz;
-
-	//! visualization for test!
-	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
-		red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean, 20, 20, 200);
-	pcl::visualization::PCLVisualizer viewer("Viewer#1");
-	viewer.setBackgroundColor(255, 255, 255);
-	//viewer.addPointCloud(cloud_pn_src_demean, red_handler, "cloud1");
-	viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
-	viewer.addPointCloud(cloud_pn_med_demean, blue_handler, "cloud3");
-	while (!viewer.wasStopped()) viewer.spinOnce();
-
-	Eigen::MatrixXf src_mat_xyz_guess_final = src_mat_xyz;
-	bool isUpdated = false;
-	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_med_demean_guess(new pcl::PointCloud<pcl::PointNormal>);
-	for (int i = 0; i < this->guess_times; i++)
-	{
-		Eigen::Affine3f guess_demean_transform = getRandomRotate();		// 随机获得旋转
-		applyTransform(src_mat_xyz, src_mat_xyz_guess, guess_demean_transform);		// 把旋转应用到src_mat_xyz_guess上
-
-		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean_guess, guess_demean_transform);
-		ce->setInputSource(cloud_pn_med_demean_guess), ce->setInputTarget(cloud_pn_tgt_demean);
-		ce->determineReciprocalCorrespondences(correspondences);
-		//ce->determineCorrespondences(correspondences);
-		
-		int new_cor_num = correspondences.size();
-		cout << "  correspondences size is : " << new_cor_num << endl;
-		
-		Eigen::MatrixXf src_mat_xyz_cor_guess, tgt_mat_xyz_cor_guess;
-		pasteWithCorrespondence(correspondences, src_mat_xyz_guess, src_mat_xyz_cor_guess, tgt_mat_xyz, tgt_mat_xyz_cor_guess);	//! 这里第2个参数要带 _guess 的！
-		float new_diff = evalDiff(src_mat_xyz_cor_guess, tgt_mat_xyz_cor_guess);
-		cout << "Guessing: min_diff = " << min_diff << " || new_diff = " << new_diff << endl;
-		//if (new_diff < min_diff)
-		if (
-			(new_cor_num > max_cor_num && (new_diff - min_diff) / min_diff <= DIFF_TOLERANCE) ||		// cor↑, diff~
-			(new_cor_num / max_cor_num > 0.9 && (new_diff - min_diff) / min_diff <= -DIFF_TOLERANCE)	// cor~, diff↓
-			)
-		{
-			isUpdated = true;
-			min_diff = new_diff;
-			max_cor_num = new_cor_num;
-			demean_transform = guess_demean_transform;
-			src_mat_xyz_guess_final = src_mat_xyz_guess;
-			cout << "Init transform updated!" << endl;
-		}
-
-		////! visualization for test!
-		//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
-		//	red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean_guess, 20, 20, 200);
-		//pcl::visualization::PCLVisualizer viewer("Viewer#1");
-		//viewer.setBackgroundColor(255, 255, 255);
-		////viewer.addPointCloud(cloud_pn_src_demean, red_handler, "cloud1");
-		//viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
-		//viewer.addPointCloud(cloud_pn_med_demean_guess, blue_handler, "cloud3");
-		//while (!viewer.wasStopped()) viewer.spinOnce();
-
-	}
-
-	if (isUpdated)
-	{
-		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, demean_transform);
-		applyTransform(src_mat_xyz, src_mat_xyz, demean_transform);		
-		applyTransform(src_mat_normal, src_mat_normal, demean_transform);
-	}
-
-	#pragma endregion
-
-
-	#pragma region 5. iterates until convergence / max
-	// 5. iterates until convergence / max
-	int iters = 0, count = 0;
-	float diff = diff_threshold + 1;
-	while (diff > this->diff_threshold && iters < this->max_iters)
-	{
-		#pragma region 5.1. find correspondence
-		// 5.1. find correspondence
-		ce->setInputSource(cloud_pn_med_demean), ce->setInputTarget(cloud_pn_tgt_demean);
-		ce->determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
-		//ce->determineCorrespondences(correspondences);
-
-		float cor_ratio = float(correspondences.size()) / cloud_src->width;
-		if (cor_ratio < MED_COR_RATIO)
-		{
-			//todo i want to relax rejection...
-			if (cor_ratio < MIN_COR_RATIO)
-			{
-				cout << "Too few points for correspondence, full correspondence triggered: " << correspondences.size() << endl;
-				ce->setInputSource(cloud_pn_med_demean), ce->setInputTarget(cloud_pn_tgt_demean);
-				ce->determineCorrespondences(correspondences);		//? 为什么一用到这个，就会发癫一样平移……
-			}
-		}
-		/*findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, true);
-		if (correspondences.size() == 0)
-		{
-			findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, false);
-			cout << "[*] WARNING: point sets may not converge!" << endl;
-		}*/
-		#pragma endregion 5.1. find correspondence
-		
-
-		#pragma region 5.2. paste into new matrix based on correspondences
-		// 5.2. paste into new matrix based on correspondences
-		pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
-		pasteWithCorrespondence(correspondences, src_mat_normal, src_mat_normal_cor, tgt_mat_normal, tgt_mat_normal_cor);
-		#pragma endregion 5.2. paste into new matrix based on correspondences
-
-
-		#pragma region 5.3. evaluate diff and print
-		// 5.3. evaluate diff
-		//! bring it to here
-		float next_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
-		if (next_diff < diff_threshold)
-		{
-			diff = next_diff;
-			break;
-		}
-		if ((diff - next_diff) / diff < 0.001)
-			if (count++ > COUNT_MAX)
-			{
-				cerr << "[*] WARNING: seems like this cannot progress..." << endl;
-				break;
-			}
-		diff = next_diff;
-		//! bring it to here
-		if (iters == 0 || iters % 10 == 1)
-			cout << "[ ] iters#" << std::right << setw(3) << iters << " - diff: " << diff / cloud_size * 1000 << "‰" << endl;
-		iters++;
-		#pragma endregion 5.3. evaluate diff
-
-
-		// 5.4. estimate best transform from src_cor to tgt_cor
-		Eigen::Affine3f incre_transform = estimateTransformSymm(src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor);
-		demean_transform = incre_transform * demean_transform;
-
-		// 5.5. pad n*3 matrix to n*4 and apply transform
-		applyTransform(src_mat_xyz, src_mat_xyz, incre_transform);
-		applyTransform(src_mat_normal, src_mat_normal, incre_transform);
-		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, incre_transform);
-		//x cout << "  current transform" << endl << transform.matrix() << endl;
-
-
-		//! visualization for test!
-		//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
-		//	red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean, 20, 20, 200);
-		//pcl::visualization::PCLVisualizer viewer("Viewer#1");
-		//viewer.setBackgroundColor(255, 255, 255);
-		////viewer.addPointCloud(cloud_pn_src_demean, red_handler, "cloud1");
-		//viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
-		//viewer.addPointCloud(cloud_pn_med_demean, blue_handler, "cloud3");
-		//while (!viewer.wasStopped()) viewer.spinOnce();
-
-	}
-	#pragma endregion 5. iterates until convergence / max
-
-
-	#pragma region print iters result
-	// print iters result
-	if (count > COUNT_MAX) ;
-	else if (iters == this->max_iters)
-		cout << "[*] WARNING: Max iterations reached!" << endl;
+	std::string ext1 = src_path.substr(src_path.find_last_of('.') + 1);
+	if (ext1 == "pcd")
+		pcdReader.read(src_path, *cloud_src);
+	else if (ext1 == "obj")
+		objReader.read(src_path, *cloud_src);
 	else
-		cout << "[*] SUCCESS: Difference reaches below threshold!" << endl;
-	cout << "[*] [ Iters#: " << iters << " - diff: " << diff / cloud_size * 1000 << "‰ ]" << endl;
-	#pragma endregion print iters result
+		return -1;
 
+	std::string ext2 = tgt_path.substr(tgt_path.find_last_of('.') + 1);
+	if (ext2 == "pcd")
+		pcdReader.read(tgt_path, *cloud_tgt);
+	else if (ext2 == "obj")
+		objReader.read(tgt_path, *cloud_tgt);
+	else
+		return -1;
 
-	#pragma region 6. find un-demean transform
-	// 6. find un-demean transform
-	//! un-demean-transform = trans(tgt_mean) * demean-transform * trans(-src_mean)
-	Eigen::Affine3f undemean_transform = Eigen::Translation3f(tgt_mean) * demean_transform * Eigen::Translation3f(-src_mean) * Eigen::Affine3f::Identity();
-	//x undemean_transform.translate(-src_mean); 
-	//x undemean_transform = demean_transform * undemean_transform; 
-	//x undemean_transform.translate(tgt_mean);			// 这里虽然放在rotate的后面，但实际上和放在rotate前是一样的
-	#pragma endregion 6. find un-demean transform
+	cout << "[-] source pts: " << cloud_src->width << " || target pts: " << cloud_tgt->width << endl;
 
-
-	#pragma region 7. print results
-	// 7. print results
-	guess_transform = undemean_transform;
-	std::cout << "Guess transform:" << endl
-		<< guess_transform.matrix() << endl;
-	#pragma endregion 7. print results
-
-
-	return guess_transform;
+	return 0;
 }
 
 void MyICP::Visualize(bool showOnce /*= false*/)
@@ -311,6 +64,154 @@ void MyICP::Visualize(bool showOnce /*= false*/)
 	else
 		while (!viewer.wasStopped()) viewer.spinOnce();
 }
+
+// ---------------------
+
+void MyICP::SetSymmParams(int maxIters, float diffThreshold, int guessTimes)
+{
+	this->maxIters = maxIters, this->diffThreshold = diffThreshold, this->guess_times = guessTimes;
+}
+
+Eigen::Affine3f MyICP::RegisterSymm()
+{
+	assert(cloud_src && cloud_tgt);
+	float cloud_size = cloud_src->getMatrixXfMap().maxCoeff() - cloud_src->getMatrixXfMap().minCoeff();
+	float diffTScale = this->diffThreshold * cloud_size;
+
+	// 0. demean (XYZ -> demean)
+	demean();
+
+	// 1. estimate normals (use demean XYZ, concatenate with normal)
+	estimateNormals();
+
+
+	// 2. copy demean src & tgt cloud into eigen matrix
+	pasteInMatrix(this->cloud_pn_src_demean, this->src_mat_xyz, this->src_mat_normal);
+	pasteInMatrix(this->cloud_pn_tgt_demean, this->tgt_mat_xyz, this->tgt_mat_normal);
+
+
+	// 3. initialize correspondences estimation
+	initCorrespondenceEstimation();
+
+
+	// 4. initialize transform
+	Eigen::Affine3f demean_transform = getInitTransform();
+	
+
+	#pragma region 5. iterates until convergence / max
+	// 5. iterates until convergence / max
+	int iters = 0, count = 0;
+	float diff = diffTScale + 1;
+	while (diff > diffTScale && iters < this->maxIters)
+	{
+		// 5.1. find correspondence
+		findCorrespondences(this->ce, this->cloud_pn_med_demean, this->cloud_pn_tgt_demean, this->correspondences);
+
+		float cor_ratio = float(this->correspondences.size()) / this->cloud_src->width;
+		if (cor_ratio < MED_COR_RATIO)
+		{
+			//todo relax rejection...
+			if (cor_ratio < MIN_COR_RATIO)
+			{
+				cout << "Too few points for correspondence, full correspondence triggered: " << correspondences.size() << endl;
+				findCorrespondences(this->ce, this->cloud_pn_med_demean, this->cloud_pn_tgt_demean, this->correspondences, false);//? 为什么一用到这个，就会发癫一样平移……
+			}
+		}
+		/*findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, true);
+		if (correspondences.size() == 0)
+		{
+			findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, false);
+			cout << "[*] WARNING: point sets may not converge!" << endl;
+		}*/
+		
+		// 5.2. paste into new matrix based on correspondences
+		pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
+		pasteWithCorrespondence(correspondences, src_mat_normal, src_mat_normal_cor, tgt_mat_normal, tgt_mat_normal_cor);
+
+		// 5.3. evaluate diff, may break
+		float next_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
+		if (next_diff < diffTScale)
+		{
+			diff = next_diff;
+			break;
+		}
+		if ((diff - next_diff) / diff < 0.001 && ++count > COUNT_MAX)
+		{
+			cerr << "[*] WARNING: seems like this cannot progress..." << endl;
+			break;
+		}
+		diff = next_diff;
+		if (iters == 0 || iters % 10 == 1)
+			cout << "[ ] iters#" << std::right << setw(3) << iters << " - diff: " << diff / cloud_size * 1000 << "‰" << endl;
+		iters++;
+
+		// 5.4. estimate best transform from src_cor to tgt_cor
+		Eigen::Affine3f incre_transform = estimateTransformSymm(src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor);
+		demean_transform = incre_transform * demean_transform;
+
+		// 5.5. pad n*3 matrix to n*4 and apply transform
+		applyTransform(src_mat_xyz, src_mat_xyz, incre_transform);
+		applyTransform(src_mat_normal, src_mat_normal, incre_transform);
+		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, incre_transform);
+
+		//! visualization for test!
+		//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
+		//	red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean, 20, 20, 200);
+		//pcl::visualization::PCLVisualizer viewer("Viewer#1");
+		//viewer.setBackgroundColor(255, 255, 255);
+		//viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
+		//viewer.addPointCloud(cloud_pn_med_demean, blue_handler, "cloud3");
+		//while (!viewer.wasStopped()) viewer.spinOnce();
+
+	}
+	#pragma endregion 5. iterates until convergence / max
+
+
+	// print iters result
+	if (count > COUNT_MAX) ;
+	else if (iters == this->maxIters)
+		cout << "[*] WARNING: Max iterations reached!" << endl;
+	else
+		cout << "[*] SUCCESS: Difference reaches below threshold!" << endl;
+	cout << "[*] [ Iters#: " << iters << " - diff: " << diff / cloud_size * 1000 << "‰ ]" << endl;
+
+
+	// 6. find un-demean transform
+	// un-demean-transform = trans(tgt_mean) * demean-transform * trans(-src_mean)
+	Eigen::Affine3f undemean_transform = Eigen::Translation3f(tgt_mean) * demean_transform * Eigen::Translation3f(-src_mean) * Eigen::Affine3f::Identity();
+	//x undemean_transform.translate(-src_mean); 
+	//x undemean_transform = demean_transform * undemean_transform; 
+	//x undemean_transform.translate(tgt_mean);			// 这里虽然放在rotate的后面，但实际上和放在rotate前是一样的
+
+	this->guess_transform = undemean_transform;
+
+	return this->guess_transform;
+}
+
+// ---------------------
+
+void MyICP::SetP2pParams(int maxIters)
+{
+	this->maxIters = maxIters;
+}
+
+Eigen::Affine3f MyICP::RegisterP2P()
+{
+	// icp
+	pcl::IterativeClosestPoint<PointT, PointT> icp;
+	icp.setInputSource(this->cloud_src);
+	icp.setInputTarget(this->cloud_tgt);
+	icp.setMaximumIterations(this->maxIters);
+	//icp.setEuclideanFitnessEpsilon(0.0001);
+	icp.align(*(this->cloud_apply));
+	this->guess_transform = Eigen::Affine3f(icp.getFinalTransformation());
+
+	return this->guess_transform;
+}
+
+
+// ---------------------
+
 
 void MyICP::demean()
 {
@@ -333,7 +234,7 @@ void MyICP::demean()
 		this->tgt_mean[1] += cloud_tgt->points[i].y;
 		this->tgt_mean[2] += cloud_tgt->points[i].z;
 	}
-	src_mean /= cloud_src->width, tgt_mean /= cloud_tgt->width;
+	this->src_mean /= cloud_src->width, this->tgt_mean /= cloud_tgt->width;
 
 	for (int i = 0; i < cloud_src->width; i++)
 	{
@@ -370,4 +271,95 @@ void MyICP::estimateNormals()
 	pcl::concatenateFields(*cloud_src_demean, normals_src, *cloud_pn_src_demean);
 	pcl::concatenateFields(*cloud_tgt_demean, normals_tgt, *cloud_pn_tgt_demean);
 	*cloud_pn_med_demean = *cloud_pn_src_demean;
+}
+
+inline void MyICP::initCorrespondenceEstimation()
+{
+	this->ce = pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>::Ptr(new pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>);
+	this->src_tree = pcl::search::KdTree<pcl::PointNormal>::Ptr(new pcl::search::KdTree<pcl::PointNormal>);
+	this->tgt_tree = pcl::search::KdTree<pcl::PointNormal>::Ptr(new pcl::search::KdTree<pcl::PointNormal>);
+	this->ce->setSearchMethodSource(this->src_tree), ce->setSearchMethodTarget(this->tgt_tree);
+
+	ce->setInputSource(cloud_pn_med_demean), ce->setInputTarget(cloud_pn_tgt_demean);
+	ce->determineReciprocalCorrespondences(correspondences);		// this will automatically reject the too-far-away-point-pairs
+	//ce->determineCorrespondences(correspondences);
+
+	pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
+}
+
+Eigen::Affine3f MyICP::getInitTransform()
+{
+	Eigen::Affine3f demean_transform = Eigen::Affine3f::Identity();
+
+	int max_cor_num = correspondences.size();
+	cout << "Init correspondences points: " << max_cor_num << endl;
+
+	//// visualization for test!
+	//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
+	//	red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean, 20, 20, 200);
+	//pcl::visualization::PCLVisualizer viewer("Viewer#1");
+	//viewer.setBackgroundColor(255, 255, 255);
+	//viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
+	//viewer.addPointCloud(cloud_pn_med_demean, blue_handler, "cloud3");
+	//while (!viewer.wasStopped()) viewer.spinOnce();
+
+	// 4.2. initialize transform with random guesses
+	if (this->guess_times > 0)
+	{
+		bool isUpdated = false;
+		float min_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
+		Eigen::MatrixXf src_mat_xyz_guess = src_mat_xyz;
+		pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_med_demean_guess(new pcl::PointCloud<pcl::PointNormal>);
+
+		cout << "#  |  minimum diff |   new diff   |  correspondence pts   |  updated" << endl;
+
+		for (int i = 0; i < this->guess_times; i++)
+		{
+			Eigen::Affine3f guess_demean_transform = getRandomRotate();
+			applyTransform(src_mat_xyz, src_mat_xyz_guess, guess_demean_transform);
+
+			pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean_guess, guess_demean_transform);
+			findCorrespondences(this->ce, cloud_pn_med_demean_guess, this->cloud_pn_tgt_demean, this->correspondences);
+
+			Eigen::MatrixXf src_mat_xyz_cor_guess, tgt_mat_xyz_cor_guess;
+			pasteWithCorrespondence(correspondences, src_mat_xyz_guess, src_mat_xyz_cor_guess, tgt_mat_xyz, tgt_mat_xyz_cor_guess);	//! 这里第2个参数要带 _guess 的！
+
+			float new_diff = evalDiff(src_mat_xyz_cor_guess, tgt_mat_xyz_cor_guess);
+			int new_cor_num = correspondences.size();
+			cout << std::left << setw(3) << i+1 << "|  " 
+				<< setw(9) << min_diff << "    |   " 
+				<< setw(9) << new_diff << "  |         " 
+				<< setw(6) << new_cor_num << "        |    ";
+			if ((new_cor_num > max_cor_num && (new_diff - min_diff) / min_diff <= DIFF_TOLERANCE) ||			// cor↑,  diff~
+				(new_cor_num / max_cor_num > 0.9 && (new_diff - min_diff) / min_diff <= -DIFF_TOLERANCE) ||		// cor~,  diff↓
+				(new_cor_num / max_cor_num > 1.6 && (new_diff - min_diff) / min_diff <= 6 * DIFF_TOLERANCE))	// cor↑↑, diff↑	
+			{
+				isUpdated = true;
+				min_diff = new_diff;
+				max_cor_num = new_cor_num;
+				demean_transform = guess_demean_transform;
+				cout << "***" << endl;
+			}
+			else
+				cout << endl;
+			////! visualization for test!
+			//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
+			//	red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean_guess, 20, 20, 200);
+			//pcl::visualization::PCLVisualizer viewer("Viewer#1");
+			//viewer.setBackgroundColor(255, 255, 255);
+			//viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
+			//viewer.addPointCloud(cloud_pn_med_demean_guess, blue_handler, "cloud3");
+			//while (!viewer.wasStopped()) viewer.spinOnce();
+
+		}
+
+		if (isUpdated)
+		{
+			pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, demean_transform);
+			applyTransform(src_mat_xyz, src_mat_xyz, demean_transform);
+			applyTransform(src_mat_normal, src_mat_normal, demean_transform);
+		}
+	}
+
+	return demean_transform;
 }

@@ -23,6 +23,3 @@
 #include <pcl/registration/correspondence_rejection_median_distance.h>
 
 #include <boost/algorithm/string.hpp>			// split
-
-
-#include <opencv2/opencv.hpp>

@@ -40,7 +40,6 @@ float evalDiff(const Eigen::MatrixXf& src, const Eigen::MatrixXf& tgt, const std
 }
 
 
-//x N和c忘记加引用了……
 void calculateMatrixNotation(const Eigen::MatrixXf& src_mat_xyz, const Eigen::MatrixXf& src_mat_normal, const Eigen::MatrixXf& tgt_mat_xyz, const Eigen::MatrixXf& tgt_mat_normal, Eigen::MatrixXf& M, Eigen::MatrixXf& N, Eigen::VectorXf& c)
 {
 	int npts = src_mat_xyz.rows();
@@ -92,7 +91,6 @@ Eigen::Affine3f estimateTransformSymm(const Eigen::MatrixXf& src_mat_xyz, const 
 	Eigen::Vector3f t_(0, 0, 0), a_;
 	a_ = solveLLS(M, -(N * t_ + c));
 	t_ = solveLLS(N, -(M * a_ + c));
-	cout << "t_: " << t_ << endl;
 
 
 	// 3. calculate transform matrix based on a_ and t_
