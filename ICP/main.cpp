@@ -9,13 +9,15 @@ void help();
 
 int main(int argc, char** argv)
 {
+	srand((int)time(0));
+
 	if (argc <= 3)
 	{
 		help();
 		return 0;
 	}
 
-	if (string(argv[1]) == "--symm")
+	if (string(argv[1]).substr(0, 6) == "--symm")
 	{	// ----------------------------------------
 		// --------1. symmetric registration-------
 		// ----------------------------------------
@@ -60,6 +62,11 @@ int main(int argc, char** argv)
 				}
 			}
 		}
+		if (string(argv[1]).length() > 6)
+		{
+			myicp.SetGuessTimes(atoi(argv[1] + 6));		//? works?
+		}
+
 
 		// register
 		Eigen::Affine3f guess = myicp.RegisterSymm(diff_t, max_it);

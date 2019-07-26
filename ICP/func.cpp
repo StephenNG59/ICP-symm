@@ -92,7 +92,7 @@ Eigen::Affine3f estimateTransformSymm(const Eigen::MatrixXf& src_mat_xyz, const 
 	Eigen::Vector3f t_(0, 0, 0), a_;
 	a_ = solveLLS(M, -(N * t_ + c));
 	t_ = solveLLS(N, -(M * a_ + c));
-	//cout << "t_: " << t_ << endl;
+	cout << "t_: " << t_ << endl;
 
 
 	// 3. calculate transform matrix based on a_ and t_
@@ -181,4 +181,15 @@ void deleteSomePoints(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, float deleteRat
 	}
 
 	cout << "Points remaining: " << cloud->width << endl;
+}
+
+Eigen::Affine3f getRandomRotate()
+{
+	Eigen::Vector3f axis(frandRange11(), frandRange11(), frandRange11());	//? evenly on [-1, 1] for x,y,z, but *NOT* evenly spreaded in 3D space!
+	float theta = frandRange11() * M_PI;									// -180 ~ 180
+
+	Eigen::Affine3f rotate = Eigen::Affine3f::Identity();
+	rotate.rotate(Eigen::AngleAxisf(theta, axis.normalized()));
+
+	return rotate;
 }

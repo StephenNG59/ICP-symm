@@ -5,6 +5,17 @@
 #define FRAND_RANGE11() ((float)(rand() - rand()) / RAND_MAX)		/// -1 ~ 1
 #define FRAND_RANGE01() ((float)(rand()) / RAND_MAX)				/// 0 ~ 1
 
+inline float frandRange11()
+{
+	return ((float)(rand() - rand()) / RAND_MAX);
+}
+
+inline float frandRange01()
+{
+	return ((float)(rand()) / RAND_MAX);
+}
+
+
 void pasteInMatrix(const pcl::PointCloud<pcl::PointNormal>::Ptr cloud, Eigen::MatrixXf& mat_xyz, Eigen::MatrixXf& mat_normal);
 
 
@@ -41,3 +52,5 @@ void findCorrespondences(pcl::registration::CorrespondenceEstimation<pcl::PointN
 
 void deleteSomePoints(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, float ratio, bool useHard = false);
 
+
+Eigen::Affine3f getRandomRotate();

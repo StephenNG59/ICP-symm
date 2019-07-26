@@ -3,7 +3,7 @@
 #include "myicp.h"
 #include "func.h"
 
-MyICP::MyICP() : max_iters(DEFAULT_MAX_ITERS), diff_threshold(DEFAULT_DIFF_THRESH)
+MyICP::MyICP() : max_iters(DEFAULT_MAX_ITERS), diff_threshold(DEFAULT_DIFF_THRESH), guess_times()
 {
 	pclcloud_src = pcl::PCLPointCloud2::Ptr(new pcl::PCLPointCloud2);
 	pclcloud_tgt = pcl::PCLPointCloud2::Ptr(new pcl::PCLPointCloud2);
@@ -71,50 +71,150 @@ Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH
 	// 0. demean (XYZ -> demean)
 	demean();
 
-
 	// 1. estimate normals (use demean XYZ, concatenate with normal)
 	estimateNormals();
 
 
+	#pragma region 2.copy demean src & tgt cloud into eigen matrix
 	// 2. copy demean src & tgt cloud into eigen matrix
 	Eigen::MatrixXf src_mat_xyz, src_mat_normal, tgt_mat_xyz, tgt_mat_normal;
 	pasteInMatrix(cloud_pn_src_demean, src_mat_xyz, src_mat_normal);
 	pasteInMatrix(cloud_pn_tgt_demean, tgt_mat_xyz, tgt_mat_normal);
+	#pragma endregion
 
 
-	// 3. initialize transform = Identity
-	Eigen::Affine3f demean_transform = Eigen::Affine3f::Identity();
-
-
-	// 4. initialize correspondences estimation
+	#pragma region 3. initialize correspondences estimation
+	// 3. initialize correspondences estimation
 	pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>::Ptr ce(new pcl::registration::CorrespondenceEstimation<pcl::PointNormal, pcl::PointNormal>());
+	//x pcl::registration::CorrespondenceEstimationNormalShooting<pcl::PointNormal, pcl::PointNormal, pcl::PointNormal>::Ptr ceee(new pcl::registration::CorrespondenceEstimationNormalShooting<pcl::PointNormal, pcl::PointNormal, pcl::PointNormal>);
 	pcl::search::KdTree<pcl::PointNormal>::Ptr src_tree(new pcl::search::KdTree<pcl::PointNormal>), tgt_tree(new pcl::search::KdTree<pcl::PointNormal>);
 	ce->setSearchMethodSource(src_tree), ce->setSearchMethodTarget(tgt_tree);
+	pcl::Correspondences correspondences;
+	#pragma endregion
 
 
+	#pragma region 4. initialize transform = Identity
+	// 4. initialize transform = Identity
+	Eigen::Affine3f demean_transform = Eigen::Affine3f::Identity();
+	ce->setInputSource(cloud_pn_med_demean), ce->setInputTarget(cloud_pn_tgt_demean);
+	ce->determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
+	//ce->determineCorrespondences(correspondences);
+	int max_cor_num = correspondences.size();
+	cout << "Init correspondences points: " << max_cor_num << endl;
+	
+	Eigen::MatrixXf src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor;
+	pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
+	
+	// 4.2. initialize transform with random guesses
+	float min_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
+	Eigen::MatrixXf src_mat_xyz_guess = src_mat_xyz;
+
+	//! visualization for test!
+	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
+		red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean, 20, 20, 200);
+	pcl::visualization::PCLVisualizer viewer("Viewer#1");
+	viewer.setBackgroundColor(255, 255, 255);
+	//viewer.addPointCloud(cloud_pn_src_demean, red_handler, "cloud1");
+	viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
+	viewer.addPointCloud(cloud_pn_med_demean, blue_handler, "cloud3");
+	while (!viewer.wasStopped()) viewer.spinOnce();
+
+	Eigen::MatrixXf src_mat_xyz_guess_final = src_mat_xyz;
+	bool isUpdated = false;
+	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_pn_med_demean_guess(new pcl::PointCloud<pcl::PointNormal>);
+	for (int i = 0; i < this->guess_times; i++)
+	{
+		Eigen::Affine3f guess_demean_transform = getRandomRotate();		// 随机获得旋转
+		applyTransform(src_mat_xyz, src_mat_xyz_guess, guess_demean_transform);		// 把旋转应用到src_mat_xyz_guess上
+
+		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean_guess, guess_demean_transform);
+		ce->setInputSource(cloud_pn_med_demean_guess), ce->setInputTarget(cloud_pn_tgt_demean);
+		ce->determineReciprocalCorrespondences(correspondences);
+		//ce->determineCorrespondences(correspondences);
+		
+		int new_cor_num = correspondences.size();
+		cout << "  correspondences size is : " << new_cor_num << endl;
+		
+		Eigen::MatrixXf src_mat_xyz_cor_guess, tgt_mat_xyz_cor_guess;
+		pasteWithCorrespondence(correspondences, src_mat_xyz_guess, src_mat_xyz_cor_guess, tgt_mat_xyz, tgt_mat_xyz_cor_guess);	//! 这里第2个参数要带 _guess 的！
+		float new_diff = evalDiff(src_mat_xyz_cor_guess, tgt_mat_xyz_cor_guess);
+		cout << "Guessing: min_diff = " << min_diff << " || new_diff = " << new_diff << endl;
+		//if (new_diff < min_diff)
+		if (
+			(new_cor_num > max_cor_num && (new_diff - min_diff) / min_diff <= DIFF_TOLERANCE) ||		// cor↑, diff~
+			(new_cor_num / max_cor_num > 0.9 && (new_diff - min_diff) / min_diff <= -DIFF_TOLERANCE)	// cor~, diff↓
+			)
+		{
+			isUpdated = true;
+			min_diff = new_diff;
+			max_cor_num = new_cor_num;
+			demean_transform = guess_demean_transform;
+			src_mat_xyz_guess_final = src_mat_xyz_guess;
+			cout << "Init transform updated!" << endl;
+		}
+
+		////! visualization for test!
+		//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal>
+		//	red_handler(cloud_pn_src_demean, 200, 20, 20), green_handler(cloud_pn_tgt_demean, 20, 200, 20), blue_handler(cloud_pn_med_demean_guess, 20, 20, 200);
+		//pcl::visualization::PCLVisualizer viewer("Viewer#1");
+		//viewer.setBackgroundColor(255, 255, 255);
+		////viewer.addPointCloud(cloud_pn_src_demean, red_handler, "cloud1");
+		//viewer.addPointCloud(cloud_pn_tgt_demean, green_handler, "cloud2");
+		//viewer.addPointCloud(cloud_pn_med_demean_guess, blue_handler, "cloud3");
+		//while (!viewer.wasStopped()) viewer.spinOnce();
+
+	}
+
+	if (isUpdated)
+	{
+		pcl::transformPointCloudWithNormals<pcl::PointNormal>(*cloud_pn_med_demean, *cloud_pn_med_demean, demean_transform);
+		applyTransform(src_mat_xyz, src_mat_xyz, demean_transform);		
+		applyTransform(src_mat_normal, src_mat_normal, demean_transform);
+	}
+
+	#pragma endregion
+
+
+	#pragma region 5. iterates until convergence / max
 	// 5. iterates until convergence / max
 	int iters = 0, count = 0;
-	//float diff = evalDiff(src_mat_xyz, tgt_mat_xyz);
 	float diff = diff_threshold + 1;
 	while (diff > this->diff_threshold && iters < this->max_iters)
 	{
-
+		#pragma region 5.1. find correspondence
 		// 5.1. find correspondence
-		pcl::Correspondences correspondences;
 		ce->setInputSource(cloud_pn_med_demean), ce->setInputTarget(cloud_pn_tgt_demean);
 		ce->determineReciprocalCorrespondences(correspondences);		//! this will automatically reject the too-far-away-point-pairs
+		//ce->determineCorrespondences(correspondences);
+
+		float cor_ratio = float(correspondences.size()) / cloud_src->width;
+		if (cor_ratio < MED_COR_RATIO)
+		{
+			//todo i want to relax rejection...
+			if (cor_ratio < MIN_COR_RATIO)
+			{
+				cout << "Too few points for correspondence, full correspondence triggered: " << correspondences.size() << endl;
+				ce->setInputSource(cloud_pn_med_demean), ce->setInputTarget(cloud_pn_tgt_demean);
+				ce->determineCorrespondences(correspondences);		//? 为什么一用到这个，就会发癫一样平移……
+			}
+		}
 		/*findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, true);
 		if (correspondences.size() == 0)
 		{
 			findCorrespondences(cloud_pn_med_demean, cloud_pn_tgt_demean, correspondences, false);
 			cout << "[*] WARNING: point sets may not converge!" << endl;
 		}*/
+		#pragma endregion 5.1. find correspondence
 		
+
+		#pragma region 5.2. paste into new matrix based on correspondences
 		// 5.2. paste into new matrix based on correspondences
-		Eigen::MatrixXf src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor;
 		pasteWithCorrespondence(correspondences, src_mat_xyz, src_mat_xyz_cor, tgt_mat_xyz, tgt_mat_xyz_cor);
 		pasteWithCorrespondence(correspondences, src_mat_normal, src_mat_normal_cor, tgt_mat_normal, tgt_mat_normal_cor);
+		#pragma endregion 5.2. paste into new matrix based on correspondences
 
+
+		#pragma region 5.3. evaluate diff and print
 		// 5.3. evaluate diff
 		//! bring it to here
 		float next_diff = evalDiff(src_mat_xyz_cor, tgt_mat_xyz_cor);
@@ -134,6 +234,8 @@ Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH
 		if (iters == 0 || iters % 10 == 1)
 			cout << "[ ] iters#" << std::right << setw(3) << iters << " - diff: " << diff / cloud_size * 1000 << "‰" << endl;
 		iters++;
+		#pragma endregion 5.3. evaluate diff
+
 
 		// 5.4. estimate best transform from src_cor to tgt_cor
 		Eigen::Affine3f incre_transform = estimateTransformSymm(src_mat_xyz_cor, src_mat_normal_cor, tgt_mat_xyz_cor, tgt_mat_normal_cor);
@@ -157,29 +259,36 @@ Eigen::Affine3f MyICP::RegisterSymm(float diff_threshold/* = DEFAULT_DIFF_THRESH
 		//while (!viewer.wasStopped()) viewer.spinOnce();
 
 	}
+	#pragma endregion 5. iterates until convergence / max
 
+
+	#pragma region print iters result
 	// print iters result
 	if (count > COUNT_MAX) ;
-	//else if (diff > this->diff_threshold)
 	else if (iters == this->max_iters)
 		cout << "[*] WARNING: Max iterations reached!" << endl;
 	else
 		cout << "[*] SUCCESS: Difference reaches below threshold!" << endl;
 	cout << "[*] [ Iters#: " << iters << " - diff: " << diff / cloud_size * 1000 << "‰ ]" << endl;
+	#pragma endregion print iters result
 
 
-	// 5. find un-demean transform
+	#pragma region 6. find un-demean transform
+	// 6. find un-demean transform
 	//! un-demean-transform = trans(tgt_mean) * demean-transform * trans(-src_mean)
 	Eigen::Affine3f undemean_transform = Eigen::Translation3f(tgt_mean) * demean_transform * Eigen::Translation3f(-src_mean) * Eigen::Affine3f::Identity();
 	//x undemean_transform.translate(-src_mean); 
 	//x undemean_transform = demean_transform * undemean_transform; 
 	//x undemean_transform.translate(tgt_mean);			// 这里虽然放在rotate的后面，但实际上和放在rotate前是一样的
+	#pragma endregion 6. find un-demean transform
 
 
-	// 6. print results
+	#pragma region 7. print results
+	// 7. print results
 	guess_transform = undemean_transform;
 	std::cout << "Guess transform:" << endl
 		<< guess_transform.matrix() << endl;
+	#pragma endregion 7. print results
 
 
 	return guess_transform;

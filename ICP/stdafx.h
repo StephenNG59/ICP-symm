@@ -18,6 +18,9 @@
 #include <pcl/features/normal_3d.h>				// normal estimation
 #include <pcl/registration/correspondence_estimation.h>
 #include <pcl/registration/icp.h>				// iterative closest point
+#include <pcl/registration/correspondence_estimation_normal_shooting.h>
+#include <pcl/registration/correspondence_rejection.h>
+#include <pcl/registration/correspondence_rejection_median_distance.h>
 
 #include <boost/algorithm/string.hpp>			// split
 
