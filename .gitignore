@@ -1,5 +1,6 @@
 *.pcd
 *.diagsession
+mytests/
 
 # ---------------C++--------------------
 # Prerequisites

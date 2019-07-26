@@ -6,10 +6,14 @@
 
     [Github releases](https://github.com/PointCloudLibrary/pcl/releases) provides all-in-one-setup.exe.
 
+    PCL environment set-up [reference](https://blog.csdn.net/weixin_41991128/article/details/83864713) for Visual Studio.
+
 ## Usage
 
-* --symm [source-file] [target-file] [optional: max_iters] [optional: diff]                   
-    use symmetric object function to REGISTER source to target point clouds                 
+* --symm [source-file] [target-file] [optional: max_iters] [optional: diff]    
+
+    use symmetric object function to REGISTER source to target point clouds       
+              
 * --p2p [source-file] [target-file] [optional: max_iters]
 
     use umeyama function to REGISTER source to target point clouds  
@@ -18,7 +22,8 @@
 
     TRANSFORM source file and save the result in output pcd file                            
   
-* -td [source] [output-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z] [ratio]     
+* -td [source] [output-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z] [ratio]   
+
 * -tdh [source] [output-file] [axis-x, y, z] [theta-in-degree] [translate-x, y, z] [ratio]    
 
     TRANSFORM, meanwhile DELETE *ratio* of the origin points.                               
@@ -31,7 +36,9 @@
     
 * e.g.
 
-    >ICP.exe --symm bunny-src.pcd bunny-tgt.pcd 50 0.001                                 
+    >ICP.exe --symm bunny-src.pcd bunny-tgt.pcd                                
+    
+    >ICP.exe --symm20 bunny-src.pcd bunny-tgt.pcd 50 0.001                                 
     
     >ICP.exe --p2p bunny-src.pcd bunny-tgt.pcd 10 --show-once                            
     
